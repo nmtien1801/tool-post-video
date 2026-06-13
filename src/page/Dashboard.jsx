@@ -7,23 +7,16 @@ const PRIVACY_OPTIONS = [
   { value: 'SELF_ONLY', label: 'Chỉ mình tôi', icon: '🔒' },
 ];
 
-// 🌐 ĐIỀN TÊN MIỀN THẬT CỦA BẠN VÀO ĐÂY (Cố định, không cần sửa lại nữa)
-const MY_DOMAIN = "https://video.cmicstudio.shop";
+const MY_DOMAIN = import.meta.env?.VITE_REACT_URL || '';
 
 export default function Dashboard() {
   const [videoFile, setVideoFile] = useState(null);
   const [videoUrl, setVideoUrl] = useState('');
   const [dragging, setDragging] = useState(false);
 
-  // 🌟 LẤY GIÁ TRỊ TỪ FILE .ENV (Hỗ trợ cả Vite lẫn Create React App)
-  const [apiKey] = useState(
-    import.meta.env?.VITE_ZERNIO_API_KEY || process.env?.REACT_APP_ZERNIO_API_KEY || ''
-  );
-  const [accountId] = useState(
-    import.meta.env?.VITE_TIKTOK_ACCOUNT_ID || process.env?.REACT_APP_TIKTOK_ACCOUNT_ID || ''
-  );
+  const [apiKey] = useState(import.meta.env?.VITE_ZERNIO_API_KEY_TIKTOK || '');
+  const [accountId] = useState(import.meta.env?.VITE_TIKTOK_ACCOUNT_ID_TIKTOK || '');
 
-  // Các cấu hình Form khác
   const [caption, setCaption] = useState('');
   const [privacy, setPrivacy] = useState('PUBLIC_TO_EVERYONE');
   const [allowComment, setAllowComment] = useState(true);
@@ -32,7 +25,6 @@ export default function Dashboard() {
   const [aiDisclosure, setAiDisclosure] = useState(false);
   const [coverMs, setCoverMs] = useState(1000);
 
-  // Trạng thái hệ thống
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState('');
   const [result, setResult] = useState(null);
@@ -41,7 +33,6 @@ export default function Dashboard() {
   const handleFileSelect = (file) => {
     if (file && file.type.startsWith('video/')) {
       setVideoFile(file);
-      // Tạo URL nội bộ để trình duyệt hiển thị xem trước video mượt mà ngay trên máy local
       setVideoUrl(URL.createObjectURL(file));
       setError(null);
       setResult(null);
@@ -54,7 +45,6 @@ export default function Dashboard() {
     handleFileSelect(e.dataTransfer.files[0]);
   };
 
-  // Hàm kiểm tra tính hợp lệ của Form trước khi bấm Đăng
   const isFormValid = () => {
     return (
       videoFile !== null &&
@@ -71,20 +61,17 @@ export default function Dashboard() {
     setResult(null);
 
     try {
-      // ── BƯỚC 1: Tự động khởi tạo Link trực tiếp từ Tên miền thật kết nối về Local ──
       setUploadStatus('1/2: Đang đồng bộ đường dẫn từ Local Server...');
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      // Tự động lấy tên của file video bạn đã chọn và nối đuôi vào link miền thật
       const fileName = videoFile.name;
       const publicHttpsUrl = `${MY_DOMAIN}/videos/${fileName}`;
 
-      // ── BƯỚC 2: Gửi API sang Zernio để đăng lên TikTok ──
       setUploadStatus('2/2: Đang gửi yêu cầu sang TikTok... Vui lòng không tắt máy.');
 
       const payload = {
         content: caption,
-        mediaItems: [{ type: 'video', url: publicHttpsUrl }], // Zernio sẽ qua Cloudflare Tunnel chui vào ổ cứng máy bạn lấy file này
+        mediaItems: [{ type: 'video', url: publicHttpsUrl }],
         platforms: [{ platform: 'tiktok', accountId: accountId.trim() }],
         tiktokSettings: {
           privacy_level: privacy,
@@ -125,98 +112,113 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-[#0d0e15] text-slate-100 font-sans p-6 relative overflow-x-hidden">
+      {/* Background Glows */}
       <div className="absolute top-0 right-1/4 w-[500px] h-[500px] bg-pink-500/5 blur-[150px] rounded-full pointer-events-none" />
       <div className="absolute bottom-0 left-1/4 w-[500px] h-[500px] bg-blue-500/5 blur-[150px] rounded-full pointer-events-none" />
 
       {/* Header */}
-      <div className="max-w-7xl mx-auto flex items-center justify-between border-b border-slate-800 pb-5 mb-8">
+      <div className="max-w-7xl mx-auto flex items-center justify-between border-b border-slate-800 pb-4 mb-6">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-pink-500 via-red-500 to-yellow-500 flex items-center justify-center font-bold shadow-lg shadow-pink-500/20">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-pink-500 via-red-500 to-yellow-500 flex items-center justify-center font-bold shadow-lg shadow-pink-500/20">
             ♬
           </div>
           <div>
-            <h1 className="text-xl font-black tracking-tight">TikTok Auto-Poster (Integrated Tool)</h1>
-            <p className="text-xs text-slate-500">Giao diện & Local Server tích hợp làm một</p>
+            <h1 className="text-lg font-black tracking-tight">TikTok Auto-Poster</h1>
+            <p className="text-[11px] text-slate-500">Giao diện điều khiển tích hợp</p>
           </div>
         </div>
-        <div className="text-xs font-mono text-slate-500 px-3 py-1 bg-slate-900 rounded-full border border-slate-800">
+        <div className="text-[11px] font-mono text-slate-400 px-3 py-1 bg-slate-900 rounded-full border border-slate-800">
           Domain Connected
         </div>
       </div>
 
       {/* Main Workspace */}
-      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
+      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
 
-        {/* BÊN TRÁI: UP VIDEO & PREVIEW */}
-        <div className="lg:col-span-5 space-y-6">
-          <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 backdrop-blur-md">
-            <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-              <span>📁</span> Chọn video từ thư mục public_videos
-            </h2>
-
-            <div
-              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={handleDrop}
-              onClick={() => document.getElementById('video-file-input').click()}
-              className={`border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center gap-4 text-center cursor-pointer transition-all min-h-[180px]
-                ${dragging ? 'border-pink-500 bg-pink-500/10' : videoFile ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-slate-700 hover:border-slate-500 bg-slate-950/40'}`}
-            >
-              <input
-                id="video-file-input"
-                type="file"
-                accept="video/mp4,video/mov,video/webm"
-                className="hidden"
-                onChange={(e) => e.target.files[0] && handleFileSelect(e.target.files[0])}
-              />
-              {videoFile ? (
-                <>
-                  <div className="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center text-2xl text-emerald-400">🎬</div>
-                  <div className="max-w-xs truncate">
-                    <p className="font-medium text-sm text-slate-200">{videoFile.name}</p>
-                    <p className="text-xs text-slate-500 mt-1">{(videoFile.size / 1024 / 1024).toFixed(1)} MB · Click để đổi</p>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="w-12 h-12 rounded-xl bg-slate-800 flex items-center justify-center text-2xl text-slate-400">📹</div>
-                  <div>
-                    <p className="font-medium text-sm">Nhấp để chọn file video trong thư mục của bạn</p>
-                    <p className="text-xs text-slate-500 mt-1">Hãy chắc chắn file đã nằm trong mục "public_videos"</p>
-                  </div>
-                </>
+        {/* BÊN TRÁI: KHU VỰC CHỌN VÀ PREVIEW FULL CONTAINER */}
+        <div className="lg:col-span-5 space-y-4">
+          <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-4 backdrop-blur-md space-y-4 flex flex-col min-h-[250px]">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                <span>📁</span> Media File
+              </h2>
+              {/* NÚT THAY ĐỔI FILE: Chỉ xuất hiện khi đã chọn video thành công */}
+              {videoFile && (
+                <button
+                  type="button"
+                  onClick={() => document.getElementById('video-file-input').click()}
+                  className="text-[11px] font-medium text-pink-400 bg-pink-500/10 border border-pink-500/20 hover:bg-pink-500/20 px-2.5 py-1 rounded-lg transition-all"
+                >
+                  🔄 Đổi file khác
+                </button>
               )}
             </div>
 
-            {videoUrl && (
-              <div className="mt-6 space-y-2">
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider">Trình xem trước (9:16)</label>
-                <div className="rounded-xl overflow-hidden bg-black border border-slate-800 aspect-[9/16] max-h-[420px] mx-auto shadow-2xl relative">
-                  <video src={videoUrl} controls className="w-full h-full object-contain" />
+            <input
+              id="video-file-input"
+              type="file"
+              accept="video/mp4,video/mov,video/webm"
+              className="hidden"
+              onChange={(e) => e.target.files[0] && handleFileSelect(e.target.files[0])}
+            />
+
+            {/* TRẠNG THÁI 1: Chưa chọn file -> Hiện vùng dropzone lớn để kéo thả */}
+            {!videoFile ? (
+              <div
+                onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={handleDrop}
+                onClick={() => document.getElementById('video-file-input').click()}
+                className={`flex-1 border border-dashed rounded-xl p-6 flex flex-col items-center justify-center gap-3 text-center cursor-pointer transition-all min-h-[180px]
+                  ${dragging ? 'border-pink-500 bg-pink-500/10' : 'border-slate-800 hover:border-slate-700 bg-slate-950/40'}`}
+              >
+                <div className="w-10 h-10 rounded-lg bg-slate-800 flex items-center justify-center text-xl text-slate-400">📹</div>
+                <div>
+                  <p className="font-medium text-xs text-slate-300">Kéo thả hoặc chọn file video</p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">Yêu cầu file nằm trong mục "public_videos"</p>
                 </div>
+              </div>
+            ) : (
+              /* TRẠNG THÁI 2: Đã chọn file -> Ẩn vùng dropzone lớn, hiện thanh thông tin file và bung video FULL chiều rộng */
+              <div className="space-y-3 flex-1 flex flex-col">
+                {/* Thanh thông tin file nhỏ gọn */}
+                <div className="bg-slate-950/60 border border-slate-800/60 p-2.5 rounded-xl flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-md bg-emerald-500/10 flex items-center justify-center text-sm text-emerald-400 shrink-0">🎬</div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-xs text-slate-200 truncate">{videoFile.name}</p>
+                    <p className="text-[10px] text-slate-500">{(videoFile.size / 1024 / 1024).toFixed(1)} MB</p>
+                  </div>
+                </div>
+
+                {/* Trình xem trước BUNG FULL diện tích hộp chứa, không ép tỉ lệ điện thoại */}
+                {videoUrl && (
+                  <div className="flex-1 bg-black border border-slate-800/80 rounded-xl overflow-hidden shadow-inner flex items-center justify-center min-h-[300px]">
+                    <video src={videoUrl} controls className="w-full h-full max-h-[500px] object-contain" />
+                  </div>
+                )}
               </div>
             )}
           </div>
         </div>
 
-        {/* BÊN PHẢI: CẤU HÌNH & NÚT ĐĂNG */}
-        <div className="lg:col-span-7 space-y-6">
-          <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 backdrop-blur-md space-y-5">
+        {/* BÊN PHẢI: CẤU HÌNH CHI TIẾT FORM & CONFIG */}
+        <div className="lg:col-span-7 space-y-4">
+          <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 backdrop-blur-md space-y-4">
 
-            <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800 pb-3 flex items-center gap-2">
+            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800 pb-2.5 flex items-center gap-2">
               <span>⚙️</span> Cấu hình & Xuất bản bài viết
             </h2>
 
-            {/* CẢNH BÁO NẾU THIẾU FILE .ENV */}
+            {/* Cảnh báo thiếu file cấu hình hệ thống */}
             {(!apiKey || !accountId) && (
-              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-400">
+              <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[11px] text-amber-400">
                 ⚠️ <strong>Cảnh báo:</strong> Chưa cấu hình thông tin xác thực trong file <code>.env</code>.
               </div>
             )}
 
-            {/* Ô nhập Caption mô tả */}
+            {/* Ô nhập Caption */}
             <div>
-              <div className="flex justify-between items-center mb-1.5">
+              <div className="flex justify-between items-center mb-1">
                 <label className="block text-xs text-slate-400 font-medium">Nội dung mô tả (Caption)</label>
                 <span className={`text-[10px] font-mono ${caption.length > 2100 ? 'text-red-400' : 'text-slate-600'}`}>{caption.length}/2200</span>
               </div>
@@ -224,23 +226,23 @@ export default function Dashboard() {
                 value={caption}
                 onChange={e => setCaption(e.target.value.slice(0, 2200))}
                 placeholder="Viết caption cuốn hút... Thêm #hashtag để kéo tương tác"
-                rows={4}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm resize-none focus:border-pink-500 focus:outline-none transition-all"
+                rows={3}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs resize-none focus:border-pink-500 focus:outline-none transition-all"
               />
             </div>
 
-            {/* Lựa chọn quyền riêng tư */}
+            {/* Quyền riêng tư */}
             <div>
-              <label className="block text-xs text-slate-400 font-medium mb-2">Ai có thể xem video này?</label>
+              <label className="block text-xs text-slate-400 font-medium mb-1.5">Ai có thể xem video này?</label>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {PRIVACY_OPTIONS.map(opt => (
                   <button
                     key={opt.value}
                     type="button"
                     onClick={() => setPrivacy(opt.value)}
-                    className={`flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl border text-xs font-medium transition-all
+                    className={`flex items-center justify-center gap-1.5 py-2 px-1.5 rounded-xl border text-[11px] font-medium transition-all
                       ${privacy === opt.value
-                        ? 'border-pink-500/60 bg-pink-500/10 text-pink-400 font-bold shadow-sm'
+                        ? 'border-pink-500/60 bg-pink-500/10 text-pink-400 font-bold'
                         : 'border-slate-800 bg-slate-950/50 text-slate-400 hover:border-slate-700'}`}
                   >
                     <span>{opt.icon}</span> {opt.label}
@@ -249,40 +251,40 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Cài đặt tương tác */}
-            <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
-              <div className="flex items-center justify-between py-1">
+            {/* Tương tác nâng cao */}
+            <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
+              <div className="flex items-center justify-between py-0.5">
                 <div>
                   <p className="text-xs font-medium text-slate-300">Bình luận</p>
                   <p className="text-[10px] text-slate-500">Mở tương tác thảo luận</p>
                 </div>
-                <input type="checkbox" checked={allowComment} onChange={e => setAllowComment(e.target.checked)} className="w-4 h-4 accent-pink-500 cursor-pointer" />
+                <input type="checkbox" checked={allowComment} onChange={e => setAllowComment(e.target.checked)} className="w-3.5 h-3.5 accent-pink-500 cursor-pointer" />
               </div>
-              <div className="flex items-center justify-between py-1">
+              <div className="flex items-center justify-between py-0.5">
                 <div>
                   <p className="text-xs font-medium text-slate-300">Tính năng Duet</p>
                   <p className="text-[10px] text-slate-500">Cho người khác quay cùng</p>
                 </div>
-                <input type="checkbox" checked={allowDuet} onChange={e => setAllowDuet(e.target.checked)} className="w-4 h-4 accent-pink-500 cursor-pointer" />
+                <input type="checkbox" checked={allowDuet} onChange={e => setAllowDuet(e.target.checked)} className="w-3.5 h-3.5 accent-pink-500 cursor-pointer" />
               </div>
-              <div className="flex items-center justify-between py-1">
+              <div className="flex items-center justify-between py-0.5">
                 <div>
                   <p className="text-xs font-medium text-slate-300">Tính năng Stitch</p>
                   <p className="text-[10px] text-slate-500">Cho trích dẫn đoạn clip</p>
                 </div>
-                <input type="checkbox" checked={allowStitch} onChange={e => setAllowStitch(e.target.checked)} className="w-4 h-4 accent-pink-500 cursor-pointer" />
+                <input type="checkbox" checked={allowStitch} onChange={e => setAllowStitch(e.target.checked)} className="w-3.5 h-3.5 accent-pink-500 cursor-pointer" />
               </div>
-              <div className="flex items-center justify-between py-1">
+              <div className="flex items-center justify-between py-0.5">
                 <div>
                   <p className="text-xs font-medium text-slate-300">Gắn nhãn Nội dung AI</p>
                   <p className="text-[10px] text-slate-500">Bắt buộc nếu làm bằng AI</p>
                 </div>
-                <input type="checkbox" checked={aiDisclosure} onChange={e => setAiDisclosure(e.target.checked)} className="w-4 h-4 accent-pink-500 cursor-pointer" />
+                <input type="checkbox" checked={aiDisclosure} onChange={e => setAiDisclosure(e.target.checked)} className="w-3.5 h-3.5 accent-pink-500 cursor-pointer" />
               </div>
             </div>
 
-            {/* Tùy chỉnh ảnh bìa */}
-            <div className="space-y-1.5">
+            {/* Slider Ảnh bìa */}
+            <div className="space-y-1">
               <div className="flex justify-between items-center text-xs">
                 <label className="text-slate-400 font-medium">Thời gian chọn ảnh bìa</label>
                 <span className="font-mono text-pink-400 font-semibold">{coverMs} ms</span>
@@ -294,59 +296,55 @@ export default function Dashboard() {
               />
             </div>
 
-            {/* Trạng thái lỗi hoặc thành công */}
+            {/* Panel lỗi */}
             {error && (
-              <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-400 flex items-start gap-2">
+              <div className="p-2.5 bg-red-500/10 border border-red-500/20 rounded-xl text-[11px] text-red-400 flex items-start gap-2">
                 <span>⚠️</span> <p className="flex-1 leading-normal">{error}</p>
               </div>
             )}
 
+            {/* Panel Cảnh báo hàng chờ khi push thành công */}
             {result && (
-              <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-400 space-y-2.5">
-                <p className="font-bold text-sm flex items-center gap-1.5 text-amber-400">
+              <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[11px] text-amber-400 space-y-2">
+                <p className="font-bold text-xs flex items-center gap-1.5 text-amber-400">
                   <span>⏳</span> Đang xếp hàng xử lý trên TikTok!
                 </p>
-
-                <div className="space-y-1 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/60 text-slate-300">
-                  <p>ID bài viết: <span className="font-mono text-white bg-slate-900 px-1.5 py-0.5 rounded">{result._id || result.id || 'N/A'}</span></p>
+                <div className="space-y-0.5 bg-slate-950/60 p-2 rounded-lg border border-slate-800/60 text-slate-300">
+                  <p>ID bài viết: <span className="font-mono text-white bg-slate-900 px-1 py-0.5 rounded text-[10px]">{result._id || result.id || 'N/A'}</span></p>
                   <p className="truncate">
-                    URL Video cấp cho TikTok: {' '}
+                    URL Video: {' '}
                     <a
                       href={`${MY_DOMAIN}/videos/${videoFile?.name}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="font-mono text-pink-400 hover:underline inline-block max-w-[80%] truncate align-bottom"
+                      className="font-mono text-pink-400 hover:underline inline-block max-w-[75%] truncate align-bottom text-[10px]"
                     >
                       {MY_DOMAIN}/videos/{videoFile?.name}
                     </a>
                   </p>
                 </div>
-
-                <div className="pt-1 mt-1 border-t border-amber-500/20 text-[11px] text-amber-500/90 flex items-start gap-1.5">
-                  <span>⚠️</span>
-                  <p>
-                    <strong>Mẹo kiểm tra:</strong> Bạn có thể click vào đường link màu hồng ở trên. Nếu trình duyệt điện thoại hoặc tab ẩn danh của bạn **bật lên xem được video**, nghĩa là đường hầm thông suốt 100%, hãy cứ giữ máy bật để TikTok tự động kéo video về nhé!
-                  </p>
-                </div>
+                <p className="text-slate-400 text-[10.5px] leading-relaxed">
+                  <strong>Lưu ý:</strong> Vui lòng giữ ngầm Terminal chạy hầm Cloudflare để TikTok tải xong video từ máy tính của bạn.
+                </p>
               </div>
             )}
 
-            {/* Nút bấm hành động chính */}
+            {/* Nút trigger chính */}
             <button
               type="button"
               onClick={handlePublish}
               disabled={!isFormValid() || uploading}
-              className="w-full py-4 rounded-xl font-bold text-sm transition-all shadow-lg flex items-center justify-center gap-2 relative overflow-hidden
+              className="w-full py-3 rounded-xl font-bold text-xs tracking-wider uppercase transition-all shadow-lg flex items-center justify-center gap-2 relative overflow-hidden
                 bg-gradient-to-r from-pink-600 via-red-500 to-orange-500 hover:brightness-110 active:scale-[0.99]
                 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed disabled:shadow-none shadow-pink-900/20"
             >
               {uploading ? (
-                <div className="flex items-center gap-3">
-                  <svg className="animate-spin h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                <div className="flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 0115.41-4.14l1.42-1.42A10 10 0 003 12h1z" />
                   </svg>
-                  <span className="font-medium">{uploadStatus}</span>
+                  <span className="font-medium text-xs normal-case tracking-normal">{uploadStatus}</span>
                 </div>
               ) : (
                 <>
