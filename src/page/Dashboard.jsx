@@ -13,6 +13,12 @@ const PRIVACY_OPTIONS_YOUTUBE = [
   { value: 'PRIVATE', label: 'Riêng tư', icon: '🔒' },
 ];
 
+// 📏 Cấu hình giới hạn dung lượng lưu trữ (Bytes)
+const MAX_SIZES = {
+  tiktok: 4 * 1024 * 1024 * 1024,   // 4 GB
+  youtube: 256 * 1024 * 1024 * 1024, // 256 GB
+};
+
 const MY_DOMAIN = import.meta.env?.VITE_REACT_URL || '';
 
 export default function MultiPostDashboard() {
@@ -67,6 +73,12 @@ export default function MultiPostDashboard() {
       setVideoUrl(URL.createObjectURL(file));
       setError(null);
       setResult(null);
+
+      // Tự động bỏ chọn các nền tảng bị quá giới hạn kích thước file mới tải lên
+      setSelectedPlatforms(prev => ({
+        tiktok: file.size <= MAX_SIZES.tiktok ? prev.tiktok : false,
+        youtube: file.size <= MAX_SIZES.youtube ? prev.youtube : false,
+      }));
     }
   };
 
@@ -77,6 +89,8 @@ export default function MultiPostDashboard() {
   };
 
   const togglePlatform = (platform) => {
+    // Chỉ cho phép bật chọn nếu dung lượng file thỏa mãn kích thước tối đa
+    if (videoFile && videoFile.size > MAX_SIZES[platform]) return;
     setSelectedPlatforms(prev => ({ ...prev, [platform]: !prev[platform] }));
   };
 
@@ -84,6 +98,10 @@ export default function MultiPostDashboard() {
   const isFormValid = () => {
     if (!videoFile || caption.trim().length === 0) return false;
     if (!selectedPlatforms.tiktok && !selectedPlatforms.youtube) return false;
+
+    // Kiểm tra chặn cứng nếu kích thước tệp vượt ngưỡng của nền tảng được chọn
+    if (selectedPlatforms.tiktok && videoFile.size > MAX_SIZES.tiktok) return false;
+    if (selectedPlatforms.youtube && videoFile.size > MAX_SIZES.youtube) return false;
 
     if (selectedPlatforms.tiktok) {
       if (!apiKeys.tiktok || !accountIds.tiktok) return false;
@@ -111,21 +129,20 @@ export default function MultiPostDashboard() {
 
       setUploadStatus('2/2: Đang phân phối dữ liệu đa nền tảng...');
 
-      // 🚨 FIX LỖI YOUTUBE: Đưa cấu hình YouTube vào platformSpecificData và ép chữ thường
       const platformsPayload = [];
       if (selectedPlatforms.tiktok) {
-        platformsPayload.push({ 
-          platform: 'tiktok', 
-          accountId: accountIds.tiktok.trim() 
+        platformsPayload.push({
+          platform: 'tiktok',
+          accountId: accountIds.tiktok.trim()
         });
       }
       if (selectedPlatforms.youtube) {
-        platformsPayload.push({ 
-          platform: 'youtube', 
+        platformsPayload.push({
+          platform: 'youtube',
           accountId: accountIds.youtube.trim(),
           platformSpecificData: {
             title: title.trim(),
-            visibility: youtubePrivacy.toLowerCase(), // "public", "unlisted", "private"
+            visibility: youtubePrivacy.toLowerCase(),
           }
         });
       }
@@ -151,7 +168,7 @@ export default function MultiPostDashboard() {
         } : {}),
         ...(selectedPlatforms.youtube ? {
           youtubeSettings: {
-            is_shorts: isShort, // Các thông số phụ vẫn để ở đây
+            is_shorts: isShort,
           }
         } : {})
       };
@@ -173,7 +190,6 @@ export default function MultiPostDashboard() {
       const postId = data?.post?._id || data?.post?.id || data?._id || data?.id;
       let postData = data?.post || data;
 
-      // 🔄 POLLING KIỂM TRA TRẠNG THÁI YOUTUBE VÀ TIKTOK CÙNG LÚC
       if (postId) {
         setUploadStatus('Đang chờ các hệ thống tiếp nhận video...');
         for (let i = 0; i < 12; i++) {
@@ -185,10 +201,9 @@ export default function MultiPostDashboard() {
             const pollData = await pollRes.json();
             const refreshed = pollData?.post || pollData;
 
-            // Dò trong mảng platform xem có thông tin nào nhả về URL/ID chưa
             const tkData = refreshed?.platforms?.find(p => p.platform === 'tiktok');
             const ytData = refreshed?.platforms?.find(p => p.platform === 'youtube');
-            
+
             const isTkDone = !selectedPlatforms.tiktok || tkData?.status === 'published' || tkData?.username || tkData?.accountId?.username;
             const isYtDone = !selectedPlatforms.youtube || ytData?.status === 'published' || ytData?.platformPostId;
 
@@ -196,8 +211,7 @@ export default function MultiPostDashboard() {
               postData = refreshed;
               break;
             } else {
-               // Update tịnh tiến data nếu có 1 cái xong trước
-               postData = refreshed;
+              postData = refreshed;
             }
           } catch (_) { }
         }
@@ -212,21 +226,21 @@ export default function MultiPostDashboard() {
     }
   };
 
-  // --- BÓC TÁCH LINK KẾT QUẢ ---
   const tiktokData = result?.platforms?.find(p => p.platform === 'tiktok');
   const youtubeData = result?.platforms?.find(p => p.platform === 'youtube');
 
-  // TikTok URL
   const tkUsername = tiktokData?.accountId?.username || tiktokData?.username || tiktokData?.tiktokUsername || null;
   const tiktokProfileUrl = tkUsername ? `https://www.tiktok.com/@${tkUsername}` : null;
 
-  // YouTube URL
   const ytVideoId = youtubeData?.platformPostId || null;
   const youtubeStudioUrl = ytVideoId ? `https://studio.youtube.com/video/${ytVideoId}/edit` : null;
 
+  // Biến kiểm tra vượt dung lượng để hiển thị UI thông minh
+  const isTiktokOversized = videoFile && videoFile.size > MAX_SIZES.tiktok;
+  const isYoutubeOversized = videoFile && videoFile.size > MAX_SIZES.youtube;
+
   return (
     <div className="min-h-screen bg-[#0d0e15] text-slate-100 font-sans p-6 relative overflow-x-hidden">
-      {/* Background Glows */}
       <div className="absolute top-0 right-1/4 w-[500px] h-[500px] bg-purple-500/5 blur-[150px] rounded-full pointer-events-none" />
       <div className="absolute bottom-0 left-1/4 w-[500px] h-[500px] bg-pink-500/5 blur-[150px] rounded-full pointer-events-none" />
 
@@ -248,13 +262,10 @@ export default function MultiPostDashboard() {
 
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
 
-        {/* ================================================================= */}
-        {/* CỘT TRÁI (5/12): MEDIA FILE, TIÊU ĐỀ & CAPTION CHUNG              */}
-        {/* ================================================================= */}
+        {/* CỘT TRÁI (5/12) */}
         <div className="lg:col-span-5 space-y-4">
           <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-4 backdrop-blur-md space-y-5 flex flex-col">
-            
-            {/* 1. MEDIA CHOOSER */}
+
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
@@ -313,7 +324,6 @@ export default function MultiPostDashboard() {
             </div>
 
             <div className="border-t border-slate-800/60 pt-4 space-y-4">
-              {/* 2. TIÊU ĐỀ (Chỉ hiện và bắt buộc nếu chọn YouTube) */}
               {selectedPlatforms.youtube && (
                 <div className="space-y-1">
                   <div className="flex justify-between items-center">
@@ -330,7 +340,6 @@ export default function MultiPostDashboard() {
                 </div>
               )}
 
-              {/* 3. MÔ TẢ / CAPTION (Chung) */}
               <div className="space-y-1">
                 <div className="flex justify-between items-center">
                   <label className="block text-xs text-slate-400 font-medium">Nội dung mô tả chính (Caption / Description)</label>
@@ -349,20 +358,17 @@ export default function MultiPostDashboard() {
           </div>
         </div>
 
-
-        {/* ================================================================= */}
-        {/* CỘT PHẢI (7/12): CHỌN NỀN TẢNG VÀ CẤU HÌNH THÔNG SỐ              */}
-        {/* ================================================================= */}
+        {/* CỘT PHẢI (7/12) */}
         <div className="lg:col-span-7 space-y-4">
           <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 backdrop-blur-md space-y-5">
 
             {/* CẢNH BÁO LỖI ENV */}
-            {((selectedPlatforms.tiktok && (!apiKeys.tiktok || !accountIds.tiktok)) || 
+            {((selectedPlatforms.tiktok && (!apiKeys.tiktok || !accountIds.tiktok)) ||
               (selectedPlatforms.youtube && (!apiKeys.youtube || !accountIds.youtube))) && (
-              <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[11px] text-amber-400">
-                ⚠️ <strong>Cảnh báo:</strong> Thông tin Account ID hoặc Token trong file <code>.env</code> bị thiếu cho nền tảng đã chọn.
-              </div>
-            )}
+                <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[11px] text-amber-400">
+                  ⚠️ <strong>Cảnh báo:</strong> Thông tin Account ID hoặc Token trong file <code>.env</code> bị thiếu cho nền tảng đã chọn.
+                </div>
+              )}
 
             {/* CHỌN KÊNH PHÂN PHỐI */}
             <div>
@@ -370,30 +376,42 @@ export default function MultiPostDashboard() {
                 <span>🔗</span> Chọn nền tảng phát hành
               </h2>
               <div className="grid grid-cols-2 gap-3">
+                {/* BUTTON TIKTOK */}
                 <button
                   type="button"
+                  disabled={isTiktokOversized}
                   onClick={() => togglePlatform('tiktok')}
-                  className={`flex items-center justify-between p-3 rounded-xl border text-xs font-bold transition-all
-                    ${selectedPlatforms.tiktok ? 'border-pink-500 bg-pink-500/10 text-pink-400' : 'border-slate-800 bg-slate-950/40 text-slate-500 hover:border-slate-700'}`}
+                  className={`flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl border text-xs font-bold transition-all relative
+                    ${isTiktokOversized ? 'border-slate-800/40 bg-slate-950/20 text-slate-600 cursor-not-allowed' :
+                      selectedPlatforms.tiktok ? 'border-pink-500 bg-pink-500/10 text-pink-400' : 'border-slate-800 bg-slate-950/40 text-slate-500 hover:border-slate-700'}`}
                 >
-                  <div className="flex items-center gap-2"><span>🎵</span> TikTok</div>
-                  <input type="checkbox" checked={selectedPlatforms.tiktok} readOnly className="rounded accent-pink-500" />
+                  <div className="flex items-center gap-2">
+                    <span>🎵</span> TikTok
+                    {isTiktokOversized && <span className="text-[9px] text-red-500 font-normal bg-red-500/10 px-1.5 py-0.5 rounded ml-1">Quá 4GB</span>}
+                  </div>
+                  {!isTiktokOversized && <input type="checkbox" checked={selectedPlatforms.tiktok} readOnly className="rounded accent-pink-500 mt-1 sm:mt-0" />}
                 </button>
 
+                {/* BUTTON YOUTUBE */}
                 <button
                   type="button"
+                  disabled={isYoutubeOversized}
                   onClick={() => togglePlatform('youtube')}
-                  className={`flex items-center justify-between p-3 rounded-xl border text-xs font-bold transition-all
-                    ${selectedPlatforms.youtube ? 'border-red-500 bg-red-500/10 text-red-400' : 'border-slate-800 bg-slate-950/40 text-slate-500 hover:border-slate-700'}`}
+                  className={`flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl border text-xs font-bold transition-all relative
+                    ${isYoutubeOversized ? 'border-slate-800/40 bg-slate-950/20 text-slate-600 cursor-not-allowed' :
+                      selectedPlatforms.youtube ? 'border-red-500 bg-red-500/10 text-red-400' : 'border-slate-800 bg-slate-950/40 text-slate-500 hover:border-slate-700'}`}
                 >
-                  <div className="flex items-center gap-2"><span>📺</span> YouTube</div>
-                  <input type="checkbox" checked={selectedPlatforms.youtube} readOnly className="rounded accent-red-500" />
+                  <div className="flex items-center gap-2">
+                    <span>📺</span> YouTube
+                    {isYoutubeOversized && <span className="text-[9px] text-red-500 font-normal bg-red-500/10 px-1.5 py-0.5 rounded ml-1">Quá 256GB</span>}
+                  </div>
+                  {!isYoutubeOversized && <input type="checkbox" checked={selectedPlatforms.youtube} readOnly className="rounded accent-red-500 mt-1 sm:mt-0" />}
                 </button>
               </div>
             </div>
 
             {/* TIKTOK SETTINGS */}
-            {selectedPlatforms.tiktok && (
+            {selectedPlatforms.tiktok && !isTiktokOversized && (
               <div className="border-t border-slate-800/60 pt-4 space-y-3">
                 <h3 className="text-[11px] font-bold text-pink-400 uppercase tracking-wider">Cấu hình riêng TikTok</h3>
                 <div className="space-y-1.5">
@@ -431,7 +449,7 @@ export default function MultiPostDashboard() {
             )}
 
             {/* YOUTUBE SETTINGS */}
-            {selectedPlatforms.youtube && (
+            {selectedPlatforms.youtube && !isYoutubeOversized && (
               <div className="border-t border-slate-800/60 pt-4 space-y-3">
                 <h3 className="text-[11px] font-bold text-red-400 uppercase tracking-wider">Cấu hình riêng YouTube</h3>
                 <div className="space-y-1.5">
@@ -466,7 +484,7 @@ export default function MultiPostDashboard() {
                 </p>
                 <div className="space-y-1 bg-slate-950/80 p-2.5 rounded-lg border border-slate-800/60 text-slate-300 font-mono text-[10px]">
                   <p>ID Giao dịch Zernio: <span className="text-white select-all">{result._id || result.id || 'N/A'}</span></p>
-                  
+
                   {selectedPlatforms.tiktok && (
                     <p className="border-t border-slate-800/60 pt-1.5 mt-1.5 flex items-center flex-wrap gap-1">
                       <span>🎵 Kênh TikTok: </span>
