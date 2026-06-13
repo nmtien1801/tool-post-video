@@ -25,7 +25,7 @@ function Login() {
             if (response.data.EC === 0 && userData) {
                 login(userData);
                 // Chuyển hướng đến dashboard sau khi đăng nhập thành công
-                navigate('/dashboard');
+                navigate('/youtube-dashboard');
             } else {
                 setError('Tài khoản hoặc mật khẩu không đúng. Vui lòng thử lại.');
             }

@@ -15,7 +15,7 @@ export default function Dashboard() {
   const [dragging, setDragging] = useState(false);
 
   const [apiKey] = useState(import.meta.env?.VITE_ZERNIO_API_KEY_TIKTOK || '');
-  const [accountId] = useState(import.meta.env?.VITE_TIKTOK_ACCOUNT_ID_TIKTOK || '');
+  const [accountId] = useState(import.meta.env?.VITE_TIKTOK_ACCOUNT_ID || '');
 
   const [caption, setCaption] = useState('');
   const [privacy, setPrivacy] = useState('PUBLIC_TO_EVERYONE');
