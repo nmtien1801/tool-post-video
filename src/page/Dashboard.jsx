@@ -302,9 +302,32 @@ export default function Dashboard() {
             )}
 
             {result && (
-              <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-400 space-y-1.5">
-                <p className="font-bold text-sm flex items-center gap-1.5"><span>🎉</span> Đăng tải thành công!</p>
-                <p className="text-slate-400">Hệ thống TikTok đang xử lý video. ID: <span className="font-mono text-white bg-slate-900 px-1.5 py-0.5 rounded">{result._id || 'N/A'}</span></p>
+              <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-400 space-y-2.5">
+                <p className="font-bold text-sm flex items-center gap-1.5 text-amber-400">
+                  <span>⏳</span> Đang xếp hàng xử lý trên TikTok!
+                </p>
+
+                <div className="space-y-1 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/60 text-slate-300">
+                  <p>ID bài viết: <span className="font-mono text-white bg-slate-900 px-1.5 py-0.5 rounded">{result._id || result.id || 'N/A'}</span></p>
+                  <p className="truncate">
+                    URL Video cấp cho TikTok: {' '}
+                    <a
+                      href={`${MY_DOMAIN}/videos/${videoFile?.name}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-mono text-pink-400 hover:underline inline-block max-w-[80%] truncate align-bottom"
+                    >
+                      {MY_DOMAIN}/videos/{videoFile?.name}
+                    </a>
+                  </p>
+                </div>
+
+                <div className="pt-1 mt-1 border-t border-amber-500/20 text-[11px] text-amber-500/90 flex items-start gap-1.5">
+                  <span>⚠️</span>
+                  <p>
+                    <strong>Mẹo kiểm tra:</strong> Bạn có thể click vào đường link màu hồng ở trên. Nếu trình duyệt điện thoại hoặc tab ẩn danh của bạn **bật lên xem được video**, nghĩa là đường hầm thông suốt 100%, hãy cứ giữ máy bật để TikTok tự động kéo video về nhé!
+                  </p>
+                </div>
               </div>
             )}
 
