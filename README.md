@@ -11,7 +11,7 @@ npm install --save-dev electron electron-builder wait-on cross-env
 
 # build
 npm run build
-cd C:\Users\Admin\Desktop\test\my-tool
+cd C:\Users\Admin\Desktop\test\tool\tool-post-video
 npm run dist
 
 # dev

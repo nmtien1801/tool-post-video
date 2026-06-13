@@ -24,7 +24,6 @@
       "dist/**/*",
       "electron/**/*",
       "server/**/*",
-      "public_videos/**/*",
       "package.json"
     ],
     "extraMetadata": {
@@ -46,6 +45,18 @@
       {
         "from": "resources/ffprobe.exe",
         "to": "ffprobe.exe"
+      },
+      {
+        "from": "public_videos",
+        "to": "public_videos"
+      },
+      {
+        "from": "server",
+        "to": "server"
+      },
+      {
+        "from": "cloudflared.exe",
+        "to": "cloudflared.exe"
       }
     ],
     "asarUnpack": [

@@ -64,7 +64,6 @@ export default function MultiPostDashboard() {
   const [uploadStatus, setUploadStatus] = useState('');
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
-  const [showDebug, setShowDebug] = useState(false);
 
   // --- XỬ LÝ FILE ---
   const handleFileSelect = (file) => {
@@ -118,7 +117,6 @@ export default function MultiPostDashboard() {
     setUploading(true);
     setError(null);
     setResult(null);
-    setShowDebug(false);
 
     try {
       setUploadStatus('1/2: Đang đồng bộ video từ Local Server...');
@@ -485,6 +483,18 @@ export default function MultiPostDashboard() {
                 <div className="space-y-1 bg-slate-950/80 p-2.5 rounded-lg border border-slate-800/60 text-slate-300 font-mono text-[10px]">
                   <p>ID Giao dịch Zernio: <span className="text-white select-all">{result._id || result.id || 'N/A'}</span></p>
 
+                  <p className="truncate">
+                    Link video nội bộ:{' '}
+                    <a
+                      href={`${MY_DOMAIN}/videos/${videoFile?.name}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-mono text-red-400 hover:underline inline-block max-w-[70%] truncate align-bottom text-[10px]"
+                    >
+                      {MY_DOMAIN}/videos/{videoFile?.name}
+                    </a>
+                  </p>
+
                   {selectedPlatforms.tiktok && (
                     <p className="border-t border-slate-800/60 pt-1.5 mt-1.5 flex items-center flex-wrap gap-1">
                       <span>🎵 Kênh TikTok: </span>
@@ -509,17 +519,6 @@ export default function MultiPostDashboard() {
                         <span className="text-slate-500 italic">⏳ Đang đợi xử lý mã ID Video...</span>
                       )}
                     </p>
-                  )}
-                </div>
-
-                <div className="border-t border-slate-800/40 pt-2">
-                  <button type="button" onClick={() => setShowDebug(v => !v)} className="text-[10px] text-slate-500 hover:text-slate-400 transition-colors">
-                    {showDebug ? '▲ Ẩn' : '▼ Xem'} raw response (debug)
-                  </button>
-                  {showDebug && (
-                    <pre className="mt-1.5 text-[9px] text-slate-400 bg-slate-950 border border-slate-800 rounded-lg p-2 overflow-auto max-h-40 leading-relaxed font-mono">
-                      {JSON.stringify(result, null, 2)}
-                    </pre>
                   )}
                 </div>
               </div>
