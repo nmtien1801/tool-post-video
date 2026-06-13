@@ -4,7 +4,6 @@ import './index.css';
 import { AuthProvider } from './context/AuthContext';
 import Login from './page/Login';
 import Dashboard from './page/Dashboard';
-import YoutubeDashboard from './page/YoutubeDashboard';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -21,16 +20,6 @@ function App() {
             element={
               <ProtectedRoute>
                 <Dashboard />
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Route Youtube Dashboard - Protected */}
-          <Route
-            path="/youtube-dashboard"
-            element={
-              <ProtectedRoute>
-                <YoutubeDashboard />
               </ProtectedRoute>
             }
           />
