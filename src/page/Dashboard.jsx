@@ -101,7 +101,31 @@ export default function Dashboard() {
         throw new Error(data?.message || data?.error || `Lỗi từ server Zernio: ${response.status}`);
       }
 
-      setResult(data?.post || data);
+      const postId = data?.post?._id || data?.post?.id || data?._id || data?.id;
+      let postData = data?.post || data;
+
+      // 🔄 VÒNG LẶP KIỂM TRA HÀNG CHỜ ĐỒNG BỘ DỮ LIỆU (Tối đa 12 lần x 5 giây)
+      if (postId) {
+        setUploadStatus('Đang chờ TikTok tiếp nhận video...');
+        for (let i = 0; i < 12; i++) {
+          await new Promise(r => setTimeout(r, 5000));
+          try {
+            const pollRes = await fetch(`https://zernio.com/api/v1/posts/${postId}`, {
+              headers: { 'Authorization': `Bearer ${apiKey.trim()}` }
+            });
+            const pollData = await pollRes.json();
+            const refreshed = pollData?.post || pollData;
+
+            // Khi trạng thái chuyển sang published hoặc tìm thấy thông tin định danh kênh
+            if (refreshed?.status === 'published' || refreshed?.platforms?.[0]?.username) {
+              postData = refreshed;
+              break;
+            }
+          } catch (_) { }
+        }
+      }
+
+      setResult(postData);
     } catch (err) {
       setError(err.message || 'Đã xảy ra lỗi không xác định');
     } finally {
@@ -109,6 +133,13 @@ export default function Dashboard() {
       setUploadStatus('');
     }
   };
+
+  // Trích xuất thông tin tài khoản trực tiếp từ kết quả đồng bộ của Zernio
+  const targetPlatform = result?.platforms?.[0];
+  const tiktokUsername = targetPlatform?.accountId?.username || null;
+
+  // Dựng dynamic link dẫn thẳng vào profile cá nhân của bạn
+  const tiktokProfileUrl = tiktokUsername ? `https://www.tiktok.com/@${tiktokUsername}` : null;
 
   return (
     <div className="min-h-screen bg-[#0d0e15] text-slate-100 font-sans p-6 relative overflow-x-hidden">
@@ -142,7 +173,6 @@ export default function Dashboard() {
               <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
                 <span>📁</span> Media File
               </h2>
-              {/* NÚT THAY ĐỔI FILE: Chỉ xuất hiện khi đã chọn video thành công */}
               {videoFile && (
                 <button
                   type="button"
@@ -162,7 +192,6 @@ export default function Dashboard() {
               onChange={(e) => e.target.files[0] && handleFileSelect(e.target.files[0])}
             />
 
-            {/* TRẠNG THÁI 1: Chưa chọn file -> Hiện vùng dropzone lớn để kéo thả */}
             {!videoFile ? (
               <div
                 onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
@@ -179,9 +208,7 @@ export default function Dashboard() {
                 </div>
               </div>
             ) : (
-              /* TRẠNG THÁI 2: Đã chọn file -> Ẩn vùng dropzone lớn, hiện thanh thông tin file và bung video FULL chiều rộng */
               <div className="space-y-3 flex-1 flex flex-col">
-                {/* Thanh thông tin file nhỏ gọn */}
                 <div className="bg-slate-950/60 border border-slate-800/60 p-2.5 rounded-xl flex items-center gap-3">
                   <div className="w-7 h-7 rounded-md bg-emerald-500/10 flex items-center justify-center text-sm text-emerald-400 shrink-0">🎬</div>
                   <div className="min-w-0 flex-1">
@@ -190,7 +217,6 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* Trình xem trước BUNG FULL diện tích hộp chứa, không ép tỉ lệ điện thoại */}
                 {videoUrl && (
                   <div className="flex-1 bg-black border border-slate-800/80 rounded-xl overflow-hidden shadow-inner flex items-center justify-center min-h-[300px]">
                     <video src={videoUrl} controls className="w-full h-full max-h-[500px] object-contain" />
@@ -209,7 +235,6 @@ export default function Dashboard() {
               <span>⚙️</span> Cấu hình & Xuất bản bài viết
             </h2>
 
-            {/* Cảnh báo thiếu file cấu hình hệ thống */}
             {(!apiKey || !accountId) && (
               <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[11px] text-amber-400">
                 ⚠️ <strong>Cảnh báo:</strong> Chưa cấu hình thông tin xác thực trong file <code>.env</code>.
@@ -303,16 +328,22 @@ export default function Dashboard() {
               </div>
             )}
 
-            {/* Panel Cảnh báo hàng chờ khi push thành công */}
+            {/* Thẻ hiển thị kết quả và Link trực tiếp tới Trang Cá Nhân TikTok */}
             {result && (
-              <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[11px] text-amber-400 space-y-2">
-                <p className="font-bold text-xs flex items-center gap-1.5 text-amber-400">
-                  <span>⏳</span> Đang xếp hàng xử lý trên TikTok!
+              <div className={`p-3.5 rounded-xl text-[11px] space-y-2 border transition-all duration-300
+                ${tiktokProfileUrl
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                  : 'bg-amber-500/10 border-amber-500/20 text-amber-400'}`}>
+
+                <p className="font-bold text-xs flex items-center gap-1.5">
+                  {tiktokProfileUrl ? <span>✅ Đã gửi lệnh xuất bản bài viết thành công!</span> : <span>⏳ Đang xếp hàng xử lý trên TikTok...</span>}
                 </p>
-                <div className="space-y-0.5 bg-slate-950/60 p-2 rounded-lg border border-slate-800/60 text-slate-300">
+
+                <div className="space-y-1 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/60 text-slate-300">
                   <p>ID bài viết: <span className="font-mono text-white bg-slate-900 px-1 py-0.5 rounded text-[10px]">{result._id || result.id || 'N/A'}</span></p>
+
                   <p className="truncate">
-                    URL Video: {' '}
+                    URL Video nội bộ: {' '}
                     <a
                       href={`${MY_DOMAIN}/videos/${videoFile?.name}`}
                       target="_blank"
@@ -322,10 +353,32 @@ export default function Dashboard() {
                       {MY_DOMAIN}/videos/{videoFile?.name}
                     </a>
                   </p>
+
+                  {/* ĐƯỜNG DẪN DIRECT THẲNG ĐẾN TRANG PROFILE TIKTOK CỦA BẠN */}
+                  <p className="truncate border-t border-slate-800/60 pt-1 mt-1 flex items-center gap-2 flex-wrap">
+                    <span>Link kênh TikTok:</span>
+                    {tiktokProfileUrl ? (
+                      <a
+                        href={tiktokProfileUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-mono text-emerald-400 hover:underline inline-block text-[10px] font-bold"
+                      >
+                        {tiktokProfileUrl} ↗️
+                      </a>
+                    ) : (
+                      <span className="font-mono text-slate-500 text-[10px] italic">
+                        ⏳ Đang chờ hệ thống đồng bộ định danh kênh...
+                      </span>
+                    )}
+                  </p>
                 </div>
-                <p className="text-slate-400 text-[10.5px] leading-relaxed">
-                  <strong>Lưu ý:</strong> Vui lòng giữ ngầm Terminal chạy hầm Cloudflare để TikTok tải xong video từ máy tính của bạn.
-                </p>
+
+                {!tiktokProfileUrl && (
+                  <p className="text-slate-400 text-[10.5px] leading-relaxed">
+                    <strong>Lưu ý:</strong> Vui lòng giữ ngầm Terminal chạy hầm Cloudflare để TikTok tải xong video từ máy tính của bạn.
+                  </p>
+                )}
               </div>
             )}
 
