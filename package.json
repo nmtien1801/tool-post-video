@@ -5,11 +5,14 @@
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
-    "dev": "vite",
+    "start-backend": "node server/index.js",
+    "start-ui": "vite",
+    "start-tunnel": "cloudflared tunnel localhost:3001 --zone cmicstudio.shop --hostname video.cmicstudio.shop",
+    "dev": "concurrently \"npm run start-backend\" \"npm run start-ui\" \"npm run start-tunnel\" \"npm run electron:dev\"",
+    "electron:dev": "wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "electron:dev": "cross-env NODE_ENV=development electron .",
     "dist": "npm run build && electron-builder"
   },
   "description": "Automation Tool",
@@ -20,6 +23,8 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "server/**/*",
+      "public_videos/**/*",
       "package.json"
     ],
     "extraMetadata": {
@@ -51,7 +56,9 @@
   "dependencies": {
     "@tailwindcss/vite": "^4.1.16",
     "axios": "^1.6.0",
+    "cors": "^2.8.5",
     "electron-is-dev": "^3.0.1",
+    "express": "^4.21.0",
     "ffmpeg-static": "^5.3.0",
     "ffprobe-static": "^3.1.0",
     "fluent-ffmpeg": "^2.1.2",
@@ -65,6 +72,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "electron": "^41.2.0",
     "electron-builder": "^26.8.1",

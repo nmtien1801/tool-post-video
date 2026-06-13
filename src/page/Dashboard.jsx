@@ -7,6 +7,9 @@ const PRIVACY_OPTIONS = [
   { value: 'SELF_ONLY', label: 'Chỉ mình tôi', icon: '🔒' },
 ];
 
+// 🌐 ĐIỀN TÊN MIỀN THẬT CỦA BẠN VÀO ĐÂY (Cố định, không cần sửa lại nữa)
+const MY_DOMAIN = "https://video.cmicstudio.shop";
+
 export default function Dashboard() {
   const [videoFile, setVideoFile] = useState(null);
   const [videoUrl, setVideoUrl] = useState('');
@@ -38,7 +41,7 @@ export default function Dashboard() {
   const handleFileSelect = (file) => {
     if (file && file.type.startsWith('video/')) {
       setVideoFile(file);
-      // Tạo URL cục bộ để hiển thị trình phát preview ngay lập tức trên UI
+      // Tạo URL nội bộ để trình duyệt hiển thị xem trước video mượt mà ngay trên máy local
       setVideoUrl(URL.createObjectURL(file));
       setError(null);
       setResult(null);
@@ -51,7 +54,7 @@ export default function Dashboard() {
     handleFileSelect(e.dataTransfer.files[0]);
   };
 
-  // 🌟 Cập nhật hàm kiểm tra: Chỉ cần có video và caption là có thể bấm Đăng
+  // Hàm kiểm tra tính hợp lệ của Form trước khi bấm Đăng
   const isFormValid = () => {
     return (
       videoFile !== null &&
@@ -68,19 +71,20 @@ export default function Dashboard() {
     setResult(null);
 
     try {
-      // ── BƯỚC 1: Xác thực nguồn dữ liệu từ Cloudinary ──
-      setUploadStatus('1/2: Đang chuẩn bị tệp tin media...');
+      // ── BƯỚC 1: Tự động khởi tạo Link trực tiếp từ Tên miền thật kết nối về Local ──
+      setUploadStatus('1/2: Đang đồng bộ đường dẫn từ Local Server...');
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      
-      // Sử dụng trực tiếp đường dẫn video đã lưu trữ thành công trên Cloudinary của bạn
-      const publicHttpsUrl = "https://res.cloudinary.com/dv6qgkaj4/video/upload/v1781312044/test1_chqxfq.mp4";
 
-      // ── BƯỚC 2: Gửi API sang Zernio ──
-      setUploadStatus('2/2: Đang gửi yêu cầu đăng lên TikTok...');
+      // Tự động lấy tên của file video bạn đã chọn và nối đuôi vào link miền thật
+      const fileName = videoFile.name;
+      const publicHttpsUrl = `${MY_DOMAIN}/videos/${fileName}`;
+
+      // ── BƯỚC 2: Gửi API sang Zernio để đăng lên TikTok ──
+      setUploadStatus('2/2: Đang gửi yêu cầu sang TikTok... Vui lòng không tắt máy.');
 
       const payload = {
         content: caption,
-        mediaItems: [{ type: 'video', url: publicHttpsUrl }],
+        mediaItems: [{ type: 'video', url: publicHttpsUrl }], // Zernio sẽ qua Cloudflare Tunnel chui vào ổ cứng máy bạn lấy file này
         platforms: [{ platform: 'tiktok', accountId: accountId.trim() }],
         tiktokSettings: {
           privacy_level: privacy,
@@ -107,7 +111,7 @@ export default function Dashboard() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data?.message || data?.error || `Lỗi từ server: ${response.status}`);
+        throw new Error(data?.message || data?.error || `Lỗi từ server Zernio: ${response.status}`);
       }
 
       setResult(data?.post || data);
@@ -131,12 +135,12 @@ export default function Dashboard() {
             ♬
           </div>
           <div>
-            <h1 className="text-xl font-black tracking-tight">TikTok Auto-Poster</h1>
-            <p className="text-xs text-slate-500">Thiết kế UI tinh gọn · Config qua ENV</p>
+            <h1 className="text-xl font-black tracking-tight">TikTok Auto-Poster (Integrated Tool)</h1>
+            <p className="text-xs text-slate-500">Giao diện & Local Server tích hợp làm một</p>
           </div>
         </div>
         <div className="text-xs font-mono text-slate-500 px-3 py-1 bg-slate-900 rounded-full border border-slate-800">
-          Zernio API v1 Powered
+          Domain Connected
         </div>
       </div>
 
@@ -147,7 +151,7 @@ export default function Dashboard() {
         <div className="lg:col-span-5 space-y-6">
           <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 backdrop-blur-md">
             <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-              <span>📁</span> Tải lên nội dung
+              <span>📁</span> Chọn video từ thư mục public_videos
             </h2>
 
             <div
@@ -177,8 +181,8 @@ export default function Dashboard() {
                 <>
                   <div className="w-12 h-12 rounded-xl bg-slate-800 flex items-center justify-center text-2xl text-slate-400">📹</div>
                   <div>
-                    <p className="font-medium text-sm">Kéo thả video vào đây hoặc nhấp chọn</p>
-                    <p className="text-xs text-slate-500 mt-1">MP4, MOV, WebM</p>
+                    <p className="font-medium text-sm">Nhấp để chọn file video trong thư mục của bạn</p>
+                    <p className="text-xs text-slate-500 mt-1">Hãy chắc chắn file đã nằm trong mục "public_videos"</p>
                   </div>
                 </>
               )}
@@ -206,7 +210,7 @@ export default function Dashboard() {
             {/* CẢNH BÁO NẾU THIẾU FILE .ENV */}
             {(!apiKey || !accountId) && (
               <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-400">
-                ⚠️ <strong>Cảnh báo:</strong> Hệ thống chưa phát hiện thông tin xác thực từ file <code>.env</code>. Vui lòng cấu hình file môi trường để kích hoạt tính năng đăng bài.
+                ⚠️ <strong>Cảnh báo:</strong> Chưa cấu hình thông tin xác thực trong file <code>.env</code>.
               </div>
             )}
 
