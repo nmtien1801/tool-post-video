@@ -6,6 +6,8 @@ import Login from './page/Login';
 import Dashboard from './page/Dashboard';
 import ProtectedRoute from './components/ProtectedRoute';
 
+import ImportSheet from './page/ImportSheet';
+
 function App() {
   return (
     <AuthProvider>
@@ -20,6 +22,16 @@ function App() {
             element={
               <ProtectedRoute>
                 <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Route Import Sheet */}
+          <Route
+            path="/import-sheet"
+            element={
+              <ProtectedRoute>
+                <ImportSheet />
               </ProtectedRoute>
             }
           />

@@ -1,0 +1,15 @@
+# VITE_BACKEND_URL=http://localhost:8080/api
+VITE_BACKEND_URL=https://api.cmicstudio.vn/api
+VITE_REACT_URL=https://video.cmicstudio.shop
+
+# Login ZERNIO lấy key
+VITE_ZERNIO_API_KEY_TIKTOK=
+VITE_TIKTOK_ACCOUNT_ID=
+
+VITE_YOUTUBE_ACCOUNT_ID=
+VITE_ZERNIO_API_KEY_YOUTUBE=
+
+# Login Google console lấy key
+VITE_GOOGLE_API_KEY=
+VITE_GOOGLE_CLIENT_SECRET=
+VITE_GOOGLE_CLIENT_ID=
