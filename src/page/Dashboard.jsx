@@ -14,7 +14,6 @@ const PRIVACY_OPTIONS_YOUTUBE = [
 ];
 
 // ─── GOOGLE SHEET ENV CONFIG ───
-const MY_DOMAIN = import.meta.env?.VITE_REACT_URL || '';
 const GAPI_KEY = import.meta.env?.VITE_GOOGLE_API_KEY || '';
 const CLIENT_ID = import.meta.env?.VITE_GOOGLE_CLIENT_ID || '';
 const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
@@ -46,7 +45,7 @@ function loadGis() {
 }
 
 export default function MultiPostDashboard() {
-  // ── Google Sheet States (Nạp cấu hình mặc định thẳng từ file .env) ──
+  // ── Google Sheet States ──
   const [sheetInput, setSheetInput] = useState(() => import.meta.env?.VITE_GOOGLE_SHEET_URL || '');
   const [sheetTab, setSheetTab] = useState(() => import.meta.env?.VITE_GOOGLE_SHEET_TAB || 'Trang tính1');
   const [dynamicHeaders, setDynamicHeaders] = useState([]);
@@ -102,11 +101,11 @@ export default function MultiPostDashboard() {
     setSelectedRow(null);
 
     try {
-      const range = `${sheetTab}!A:Z`;
+      const range = `${sheetTab}!A:J`; 
       const url = `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${encodeURIComponent(range)}`;
       const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error?.message || 'Không đọc được dải ô dữ liệu hệ thống.');
+      if (!res.ok) throw new Error(data?.error?.message || 'Không đọc được dữ liệu từ Google Sheet.');
 
       const values = data.values || [];
       if (!values.length) throw new Error('Sheet trống.');
@@ -115,9 +114,12 @@ export default function MultiPostDashboard() {
       setDynamicHeaders(headerRow);
 
       const mapped = values.slice(1).map((row, i) => {
-        const cells = headerRow.map((_, colIdx) => row[colIdx] || '');
+        const cells = Array.from({ length: 10 }, (_, colIdx) => row[colIdx] || '');
         return { _row: i + 2, cells: cells };
-      }).filter(r => r.cells.some(c => c.trim() !== '' && c.trim() !== 'FALSE'));
+      }).filter(r => {
+        const urlCell = r.cells[2]?.trim();
+        return urlCell !== '' && urlCell !== '—' && urlCell !== undefined;
+      });
 
       setRows(mapped);
     } catch (e) {
@@ -163,7 +165,6 @@ export default function MultiPostDashboard() {
     }
   };
 
-  // 🔥 TRIGGER TỰ ĐỘNG KẾT NỐI KHI KHỞI CHẠY APP
   useEffect(() => {
     if (sheetInput.trim() && !sheetLoading && !authed) {
       const timer = setTimeout(() => {
@@ -173,148 +174,212 @@ export default function MultiPostDashboard() {
     }
   }, []);
 
-  // ─── MAP DATA CHUẨN XÁC KHI TRÍCH XUẤT HÀNG MATRIX ───
+  // ─── CẬP NHẬT TRẠNG THÁI VÀ LINK LÊN GOOGLE SHEET ───
+  const updateSheetAfterPublish = async (rowNumber, tiktokUrl, youtubeUrl) => {
+    if (!window.gapi?.client?.sheets) return;
+    try {
+      // 1. Cập nhật Trạng thái tại cột J (Cột số 10) -> TRUE
+      await window.gapi.client.sheets.spreadsheets.values.update({
+        spreadsheetId: sheetId,
+        range: `${sheetTab}!J${rowNumber}`,
+        valueInputOption: 'USER_ENTERED',
+        resource: { values: [['TRUE']] },
+      });
+
+      // 2. Cập nhật Link YouTube vào Cột H (Pos_Ytb - Index 7)
+      if (youtubeUrl) {
+        await window.gapi.client.sheets.spreadsheets.values.update({
+          spreadsheetId: sheetId,
+          range: `${sheetTab}!H${rowNumber}`,
+          valueInputOption: 'USER_ENTERED',
+          resource: { values: [[youtubeUrl]] },
+        });
+      }
+
+      // 3. Cập nhật Link TikTok vào Cột I (Post_Tiktok - Index 8)
+      if (tiktokUrl) {
+        await window.gapi.client.sheets.spreadsheets.values.update({
+          spreadsheetId: sheetId,
+          range: `${sheetTab}!I${rowNumber}`,
+          valueInputOption: 'USER_ENTERED',
+          resource: { values: [[tiktokUrl]] },
+        });
+      }
+    } catch (e) {
+      console.error("Lỗi cập nhật dữ liệu Sheet:", e);
+    }
+  };
+
+  // ─── MAP DATA XUỐNG CỘT FORM KHI CLICK XEM ───
   const handleSelectRow = (row) => {
     setSelectedRow(row._row);
     setError(null);
     setResult(null);
 
-    // 1. Cột B (Index 1) trên UI đề chữ [Link url] / tương đương Cột C thực tế trên Sheet: Lấy URL Video để Post
-    const videoUrlFromRow = row.cells[1]?.trim() || '';
+    const videoUrlFromRow = row.cells[2]?.trim() || ''; 
     if (videoUrlFromRow && (videoUrlFromRow.startsWith('http') || videoUrlFromRow.includes('/videos/'))) {
       setVideoUrl(videoUrlFromRow);
     } else {
       setVideoUrl('');
     }
 
-    // 2. Cột C (Index 2): Map tiêu đề Video gốc lên trường YouTube Title
-    setTitle(row.cells[2] || '');
-
-    // 3. Cột D (Index 3): Map Caption / Mô tả nội dung bài đăng
-    setCaption(row.cells[3] || '');
-
-    // 4. Trạng thái Checkbox
-    const isTiktokChecked = row.cells[5]?.trim().toUpperCase() === 'TRUE';
-    const isYtbChecked = row.cells[6]?.trim().toUpperCase() === 'TRUE';
+    setTitle(row.cells[3] || ''); 
+    setCaption(row.cells[4] || ''); 
 
     setSelectedPlatforms({
-      tiktok: isTiktokChecked,
-      youtube: isYtbChecked
+      tiktok: row.cells[5]?.trim().toUpperCase() === 'TRUE', 
+      youtube: row.cells[6]?.trim().toUpperCase() === 'TRUE' 
     });
   };
 
-  const togglePlatform = (platform) => {
-    setSelectedPlatforms(prev => ({ ...prev, [platform]: !prev[platform] }));
+  // ─── HÀM GỬI PAYLOAD ĐĂNG ĐA NỀN TẢNG (ĐỒNG BỘ THEO POSTVIDEO.JSX) ───
+  const executeUploadRow = async (targetVideoUrl, targetTitle, targetCaption, platforms) => {
+    const platformsPayload = [];
+    
+    if (platforms.tiktok && accountIds.tiktok.trim()) {
+      platformsPayload.push({ 
+        platform: 'tiktok', 
+        accountId: accountIds.tiktok.trim() 
+      });
+    }
+    
+    if (platforms.youtube && accountIds.youtube.trim()) {
+      platformsPayload.push({
+        platform: 'youtube',
+        accountId: accountIds.youtube.trim(),
+        platformSpecificData: {
+          title: targetTitle.trim() || "Video Title",
+          visibility: youtubePrivacy.toLowerCase(),
+        }
+      });
+    }
+
+    if (platformsPayload.length === 0) {
+      throw new Error("Không có nền tảng nào được kích hoạt hoặc thiếu Account ID cấu hình.");
+    }
+
+    // ĐỒNG BỘ THEO POSTVIDEO.JSX: Lấy API Key chuẩn xác
+    const executionApiKey = platforms.tiktok ? apiKeys.tiktok : apiKeys.youtube;
+
+    const payload = {
+      content: targetCaption.trim(),
+      mediaItems: [{ type: 'video', url: targetVideoUrl }],
+      platforms: platformsPayload,
+      publishNow: true,
+      ...(platforms.tiktok ? {
+        tiktokSettings: {
+          privacy_level: tiktokPrivacy,
+          allow_comment: allowComment,
+          allow_duet: allowDuet,
+          allow_stitch: allowStitch,
+          video_cover_timestamp_ms: coverMs,
+          content_preview_confirmed: true,
+          express_consent_given: true,
+          ...(aiDisclosure ? { video_made_with_ai: true } : {}),
+        }
+      } : {}),
+      ...(platforms.youtube ? {
+        youtubeSettings: { is_shorts: isShort }
+      } : {})
+    };
+
+    const response = await fetch('https://zernio.com/api/v1/posts', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${executionApiKey.trim()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data?.message || data?.error || `Lỗi từ server Zernio: ${response.status}`);
+    }
+
+    const postId = data?.post?._id || data?.post?.id || data?._id || data?.id;
+    let postData = data?.post || data;
+
+    if (postId) {
+      // ĐỒNG BỘ THEO POSTVIDEO.JSX: Polling lấy dữ liệu chính xác sử dụng đúng executionApiKey
+      for (let i = 0; i < 12; i++) {
+        await new Promise(r => setTimeout(r, 5000));
+        try {
+          const pollRes = await fetch(`https://zernio.com/api/v1/posts/${postId}`, {
+            headers: { 'Authorization': `Bearer ${executionApiKey.trim()}` }
+          });
+          const pollData = await pollRes.json();
+          const refreshed = pollData?.post || pollData;
+
+          const tkData = refreshed?.platforms?.find(p => p.platform === 'tiktok');
+          const ytData = refreshed?.platforms?.find(p => p.platform === 'youtube');
+
+          const isTkDone = !platforms.tiktok || tkData?.status === 'published' || tkData?.username || tkData?.accountId?.username;
+          const isYtDone = !platforms.youtube || ytData?.status === 'published' || ytData?.platformPostId;
+
+          if (isTkDone && isYtDone) { 
+            postData = refreshed; 
+            break; 
+          } else { 
+            postData = refreshed; 
+          }
+        } catch (_) { }
+      }
+    }
+    return postData;
   };
 
-  const isFormValid = () => {
-    if (!videoUrl || caption.trim().length === 0) return false;
-    if (!selectedPlatforms.tiktok && !selectedPlatforms.youtube) return false;
-    if (selectedPlatforms.tiktok) {
-      if (!apiKeys.tiktok || !accountIds.tiktok) return false;
-    }
-    if (selectedPlatforms.youtube) {
-      if (!apiKeys.youtube || !accountIds.youtube || title.trim().length === 0) return false;
-    }
-    return true;
-  };
+  // ─── CHỨC NĂNG QUÉT TỰ ĐỘNG KHỚP THEO ẢNH SỬA ĐỔI ───
+  const handlePublishAndScan = async () => {
+    if (uploading || rows.length === 0) return;
 
-  // ─── XỬ LÝ PHÁT HÀNH TRUYỀN THÔNG ───
-  const handlePublish = async () => {
-    if (!isFormValid() || uploading) return;
+    // Cột 9 (J) - Trạng thái: Lọc các dòng mang giá trị FALSE hoặc đang để trống ô Checkbox
+    const pendingRows = rows.filter(r => r.cells[9]?.trim().toUpperCase() === 'FALSE' || r.cells[9]?.trim() === '');
+
+    if (pendingRows.length === 0) {
+      alert("Hệ thống kiểm tra: Không tìm thấy hàng nào ở trạng thái FALSE!");
+      return;
+    }
+
     setUploading(true);
     setError(null);
     setResult(null);
 
     try {
-      setUploadStatus('1/2: Đang cấu hình liên kết video từ Matrix...');
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      for (let i = 0; i < pendingRows.length; i++) {
+        const row = pendingRows[i];
+        setUploadStatus(`Đang xử lý hàng #${row._row}...`);
 
-      // URL bài đăng lấy trực tiếp từ cột Link url của dòng được chọn
-      const publicHttpsUrl = videoUrl;
+        const currentVideoUrl = row.cells[2]?.trim() || '';         // Cột 2 (C)
+        const currentTitle = row.cells[3]?.trim() || 'Video Title'; // Cột 3 (D)
+        const currentCaption = row.cells[4]?.trim() || '';         // Cột 4 (E)
+        
+        const currentPlatforms = {
+          tiktok: row.cells[5]?.trim().toUpperCase() === 'TRUE',   // Cột 5 (F)
+          youtube: row.cells[6]?.trim().toUpperCase() === 'TRUE'    // Cột 6 (G)
+        };
 
-      setUploadStatus('2/2: Đang phân phối dữ liệu đa nền tảng...');
+        if (!currentVideoUrl) continue;
+        if (!currentPlatforms.tiktok && !currentPlatforms.youtube) continue;
 
-      const platformsPayload = [];
-      if (selectedPlatforms.tiktok) {
-        platformsPayload.push({ platform: 'tiktok', accountId: accountIds.tiktok.trim() });
-      }
-      if (selectedPlatforms.youtube) {
-        platformsPayload.push({
-          platform: 'youtube',
-          accountId: accountIds.youtube.trim(),
-          platformSpecificData: {
-            title: title.trim(),
-            visibility: youtubePrivacy.toLowerCase(),
-          }
-        });
-      }
+        // Tiến hành đăng tải đa nền tảng song song đồng thời
+        const postData = await executeUploadRow(currentVideoUrl, currentTitle, currentCaption, currentPlatforms);
+        setResult(postData);
 
-      const executionApiKey = selectedPlatforms.tiktok ? apiKeys.tiktok : apiKeys.youtube;
+        const resTiktok = postData?.platforms?.find(p => p.platform === 'tiktok');
+        const resYoutube = postData?.platforms?.find(p => p.platform === 'youtube');
 
-      const payload = {
-        content: caption.trim(),
-        mediaItems: [{ type: 'video', url: publicHttpsUrl }],
-        platforms: platformsPayload,
-        publishNow: true,
-        ...(selectedPlatforms.tiktok ? {
-          tiktokSettings: {
-            privacy_level: tiktokPrivacy,
-            allow_comment: allowComment,
-            allow_duet: allowDuet,
-            allow_stitch: allowStitch,
-            video_cover_timestamp_ms: coverMs,
-            content_preview_confirmed: true,
-            express_consent_given: true,
-            ...(aiDisclosure ? { video_made_with_ai: true } : {}),
-          }
-        } : {}),
-        ...(selectedPlatforms.youtube ? {
-          youtubeSettings: { is_shorts: isShort }
-        } : {})
-      };
+        const tkUser = resTiktok?.accountId?.username || resTiktok?.username || '';
+        const tkFinalUrl = tkUser ? `https://www.tiktok.com/@${tkUser}` : '';
+        const ytId = resYoutube?.platformPostId || '';
+        const ytFinalUrl = ytId ? `https://studio.youtube.com/video/${ytId}/edit` : '';
 
-      const response = await fetch('https://zernio.com/api/v1/posts', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${executionApiKey.trim()}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data?.message || data?.error || `Lỗi từ server Zernio: ${response.status}`);
+        // Đồng bộ ghi đè dữ liệu lên cột H (7), cột I (8), cột J (9)
+        await updateSheetAfterPublish(row._row, tkFinalUrl, ytFinalUrl);
       }
 
-      const postId = data?.post?._id || data?.post?.id || data?._id || data?.id;
-      let postData = data?.post || data;
-
-      if (postId) {
-        setUploadStatus('Đang chờ các hệ thống tiếp nhận video...');
-        for (let i = 0; i < 12; i++) {
-          await new Promise(r => setTimeout(r, 5000));
-          try {
-            const pollRes = await fetch(`https://zernio.com/api/v1/posts/${postId}`, {
-              headers: { 'Authorization': `Bearer ${executionApiKey.trim()}` }
-            });
-            const pollData = await pollRes.json();
-            const refreshed = pollData?.post || pollData;
-
-            const tkData = refreshed?.platforms?.find(p => p.platform === 'tiktok');
-            const ytData = refreshed?.platforms?.find(p => p.platform === 'youtube');
-
-            const isTkDone = !selectedPlatforms.tiktok || tkData?.status === 'published' || tkData?.username || tkData?.accountId?.username;
-            const isYtDone = !selectedPlatforms.youtube || ytData?.status === 'published' || ytData?.platformPostId;
-
-            if (isTkDone && isYtDone) { postData = refreshed; break; }
-            else { postData = refreshed; }
-          } catch (_) { }
-        }
-      }
-
-      setResult(postData);
+      setUploadStatus('Đang tải lại danh sách...');
+      if (window._gToken) await fetchRows(window._gToken, sheetId);
     } catch (err) {
       setError(err.message || 'Đã xảy ra lỗi không xác định');
     } finally {
@@ -326,9 +391,7 @@ export default function MultiPostDashboard() {
   const tiktokData = result?.platforms?.find(p => p.platform === 'tiktok');
   const youtubeData = result?.platforms?.find(p => p.platform === 'youtube');
   const tkUsername = tiktokData?.accountId?.username || tiktokData?.username || tiktokData?.tiktokUsername || null;
-  const tiktokProfileUrl = tkUsername ? `https://www.tiktok.com/@${tkUsername}` : null;
   const ytVideoId = youtubeData?.platformPostId || null;
-  const youtubeStudioUrl = ytVideoId ? `https://studio.youtube.com/video/${ytVideoId}/edit` : null;
 
   return (
     <div className="min-h-screen bg-[#0d0e15] text-slate-100 font-sans p-6 relative overflow-x-hidden">
@@ -351,7 +414,7 @@ export default function MultiPostDashboard() {
 
       <div className="max-w-[1600px] mx-auto grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
 
-        {/* ── CỘT TRÁI (7/12): Chỉ gồm Box Kết Nối + Bảng dữ liệu Matrix ── */}
+        {/* ── CỘT TRÁI (7/12): Box Kết Nối + Bảng dữ liệu Matrix ── */}
         <div className="xl:col-span-7 space-y-4">
           
           {/* Kết nối Google Sheet */}
@@ -386,7 +449,7 @@ export default function MultiPostDashboard() {
             <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl overflow-hidden backdrop-blur-md">
               <div className="p-3 bg-slate-950/40 border-b border-slate-800/60 flex justify-between items-center">
                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">📑 DỮ LIỆU HÀNG</span>
-                {selectedRow && <span className="text-[10px] bg-purple-500/20 text-purple-400 font-bold px-2 py-0.5 rounded-md">Đang chọn dòng #{selectedRow}</span>}
+                {selectedRow && <span className="text-[10px] bg-purple-500/20 text-purple-400 font-bold px-2 py-0.5 rounded-md">Đang xem dòng #{selectedRow}</span>}
               </div>
               <div className="overflow-x-auto max-h-[500px]">
                 <table className="w-full text-[11px]">
@@ -422,178 +485,78 @@ export default function MultiPostDashboard() {
           )}
         </div>
 
-        {/* ── CỘT PHẢI (5/12): Form điều khiển và cấu hình xuất bản ── */}
+        {/* ── CỘT PHẢI (5/12): Form điều khiển chứa option các cấu hình nâng cao của nền tảng ── */}
         <div className="xl:col-span-5 space-y-4">
           <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 backdrop-blur-md space-y-5">
 
-            {/* PHẦN CHỌN NỀN TẢNG PHÁT HÀNH */}
             <div>
-              <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2.5 flex items-center gap-2">
-                <span>🔗</span> Nền tảng phát hành (Cột G & H)
+              <h2 className="text-xs font-bold text-purple-400 uppercase tracking-wider flex items-center gap-1.5">
+                <span>⚙️</span> CẤU HÌNH OPTION NỀN TẢNG CỐ ĐỊNH
               </h2>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button" onClick={() => togglePlatform('tiktok')}
-                  className={`flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl border text-xs font-bold transition-all relative cursor-pointer
-                    ${selectedPlatforms.tiktok ? 'border-pink-500 bg-pink-500/10 text-pink-400' : 'border-slate-800 bg-slate-950/40 text-slate-500 hover:border-slate-700'}`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span>🎵</span> TikTok
-                  </div>
-                  <input type="checkbox" checked={selectedPlatforms.tiktok} readOnly className="rounded accent-pink-500 mt-1 sm:mt-0" />
-                </button>
-
-                <button
-                  type="button" onClick={() => togglePlatform('youtube')}
-                  className={`flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl border text-xs font-bold transition-all relative cursor-pointer
-                    ${selectedPlatforms.youtube ? 'border-red-500 bg-red-500/10 text-red-400' : 'border-slate-800 bg-slate-950/40 text-slate-500 hover:border-slate-700'}`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span>📺</span> YouTube
-                  </div>
-                  <input type="checkbox" checked={selectedPlatforms.youtube} readOnly className="rounded accent-red-500 mt-1 sm:mt-0" />
-                </button>
-              </div>
-            </div>
-
-            {/* INPUTS ĐƯỢC MAP DỮ LIỆU */}
-            <div className="border-t border-slate-800/60 pt-4 space-y-3">
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                <span>✏️</span> Cấu hình Nội dung đăng
-              </h3>
-
-              {selectedPlatforms.youtube && (
-                <div className="space-y-1">
-                  <div className="flex justify-between items-center">
-                    <label className="block text-xs text-slate-400 font-medium">
-                      Tiêu đề Video (YouTube Title) <span className="text-purple-400 font-mono text-[10px]">[Cột C]</span> <span className="text-red-500">*</span>
-                    </label>
-                    <span className="text-[10px] font-mono text-slate-600">{title.length}/100</span>
-                  </div>
-                  <input
-                    type="text" value={title} onChange={e => setTitle(e.target.value.slice(0, 100))}
-                    placeholder="Nhập tiêu đề bắt buộc cho YouTube..."
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-red-500 focus:outline-none transition-all"
-                  />
-                </div>
-              )}
-
-              <div className="space-y-1">
-                <div className="flex justify-between items-center">
-                  <label className="block text-xs text-slate-400 font-medium">
-                    Caption / Mô tả nội dung <span className="text-purple-400 font-mono text-[10px]">[Cột D]</span>
-                  </label>
-                  <span className="text-[10px] font-mono text-slate-600">{caption.length}/2200</span>
-                </div>
-                <textarea
-                  value={caption} onChange={e => setCaption(e.target.value.slice(0, 2200))}
-                  placeholder="Viết mô tả hoặc caption nội dung chung cho các kênh..." rows={4}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs resize-none focus:border-purple-500 focus:outline-none transition-all"
-                />
-              </div>
+              <p className="text-[10px] text-slate-500 mt-1">Thông tin Video (Link, Title, Caption, Nền tảng đích) sẽ quét lấy trực tiếp tự động của DỮ LIỆU HÀNG.</p>
             </div>
 
             {/* CẤU HÌNH CHI TIẾT TIKTOK */}
-            {selectedPlatforms.tiktok && (
-              <div className="border-t border-slate-800/60 pt-4 space-y-3">
-                <h3 className="text-[11px] font-bold text-pink-400 uppercase tracking-wider">Cấu hình riêng TikTok</h3>
-                <div className="space-y-1.5">
-                  <label className="block text-[10px] text-slate-400 font-medium">Bảo mật</label>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                    {PRIVACY_OPTIONS_TIKTOK.map(opt => (
-                      <button
-                        key={opt.value} type="button" onClick={() => setTiktokPrivacy(opt.value)}
-                        className={`flex items-center justify-center gap-1 py-1.5 px-1 rounded-lg border text-[10px] font-medium transition-all cursor-pointer
-                          ${tiktokPrivacy === opt.value ? 'border-pink-500/60 bg-pink-500/10 text-pink-400 font-bold' : 'border-slate-800 bg-slate-950/30 text-slate-400'}`}
-                      >
-                        <span>{opt.icon}</span> <span className="truncate">{opt.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="bg-slate-950/60 border border-slate-800/60 rounded-xl p-2.5 grid grid-cols-2 gap-x-4 gap-y-1.5">
-                  {[
-                    { label: 'Bình luận', checked: allowComment, onChange: setAllowComment },
-                    { label: 'Cho phép Duet', checked: allowDuet, onChange: setAllowDuet },
-                    { label: 'Cho phép Stitch', checked: allowStitch, onChange: setAllowStitch },
-                    { label: 'Nội dung AI', checked: aiDisclosure, onChange: setAiDisclosure }
-                  ].map((item, idx) => (
-                    <div key={idx} className="flex items-center justify-between text-[11px] py-0.5">
-                      <span className="text-slate-400">{item.label}</span>
-                      <input type="checkbox" checked={item.checked} onChange={e => item.onChange(e.target.checked)} className="w-3 h-3 accent-pink-500 cursor-pointer" />
-                    </div>
+            <div className="border-t border-slate-800/60 pt-4 space-y-3">
+              <h3 className="text-[11px] font-bold text-pink-400 uppercase tracking-wider">Cấu hình riêng TikTok</h3>
+              <div className="space-y-1.5">
+                <label className="block text-[10px] text-slate-400 font-medium">Bảo mật</label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                  {PRIVACY_OPTIONS_TIKTOK.map(opt => (
+                    <button
+                      key={opt.value} type="button" onClick={() => setTiktokPrivacy(opt.value)}
+                      className={`flex items-center justify-center gap-1 py-1.5 px-1 rounded-lg border text-[10px] font-medium transition-all cursor-pointer
+                        ${tiktokPrivacy === opt.value ? 'border-pink-500/60 bg-pink-500/10 text-pink-400 font-bold' : 'border-slate-800 bg-slate-950/30 text-slate-400'}`}
+                    >
+                      <span>{opt.icon}</span> <span className="truncate">{opt.label}</span>
+                    </button>
                   ))}
                 </div>
-                <div className="flex items-center justify-between text-[11px] bg-slate-950/30 p-2 rounded-lg border border-slate-800/40">
-                  <span className="text-slate-400">Thời gian chọn ảnh bìa: <span className="font-mono text-pink-400 font-bold">{coverMs} ms</span></span>
-                  <input type="range" min={0} max={10000} step={500} value={coverMs} onChange={e => setCoverMs(Number(e.target.value))} className="w-32 accent-pink-500" />
-                </div>
               </div>
-            )}
+              <div className="bg-slate-950/60 border border-slate-800/60 rounded-xl p-2.5 grid grid-cols-2 gap-x-4 gap-y-1.5">
+                {[
+                  { label: 'Bình luận', checked: allowComment, onChange: setAllowComment },
+                  { label: 'Cho phép Duet', checked: allowDuet, onChange: setAllowDuet },
+                  { label: 'Cho phép Stitch', checked: allowStitch, onChange: setAllowStitch },
+                  { label: 'Nội dung AI', checked: aiDisclosure, onChange: setAiDisclosure }
+                ].map((item, idx) => (
+                  <div key={idx} className="flex items-center justify-between text-[11px] py-0.5">
+                    <span className="text-slate-400">{item.label}</span>
+                    <input type="checkbox" checked={item.checked} onChange={e => item.onChange(e.target.checked)} className="w-3 h-3 accent-pink-500 cursor-pointer" />
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-between text-[11px] bg-slate-950/30 p-2 rounded-lg border border-slate-800/40">
+                <span className="text-slate-400">Thời gian chọn ảnh bìa: <span className="font-mono text-pink-400 font-bold">{coverMs} ms</span></span>
+                <input type="range" min={0} max={10000} step={500} value={coverMs} onChange={e => setCoverMs(Number(e.target.value))} className="w-32 accent-pink-500" />
+              </div>
+            </div>
 
             {/* CẤU HÌNH CHI TIẾT YOUTUBE */}
-            {selectedPlatforms.youtube && (
-              <div className="border-t border-slate-800/60 pt-4 space-y-3">
-                <h3 className="text-[11px] font-bold text-red-400 uppercase tracking-wider">Cấu hình riêng YouTube</h3>
-                <div className="space-y-1.5">
-                  <label className="block text-[10px] text-slate-400 font-medium">Bảo mật</label>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {PRIVACY_OPTIONS_YOUTUBE.map(opt => (
-                      <button
-                        key={opt.value} type="button" onClick={() => setYoutubePrivacy(opt.value)}
-                        className={`flex items-center justify-center gap-1.5 py-1.5 px-1 rounded-lg border text-[10px] font-medium transition-all cursor-pointer
-                          ${youtubePrivacy === opt.value ? 'border-red-500 bg-red-500/10 text-red-400 font-bold' : 'border-slate-800 bg-slate-950/30 text-slate-400'}`}
-                      >
-                        <span>{opt.icon}</span> {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="bg-slate-950/60 border border-slate-800/60 rounded-xl p-2.5 flex items-center justify-between text-[11px]">
-                  <div>
-                    <p className="font-medium text-slate-300">Định dạng YouTube Shorts</p>
-                    <p className="text-[10px] text-slate-500 mt-0.5">Ép luồng cho video dọc dưới 60 giây</p>
-                  </div>
-                  <input type="checkbox" checked={isShort} onChange={e => setIsShort(e.target.checked)} className="w-3.5 h-3.5 accent-red-500 cursor-pointer" />
+            <div className="border-t border-slate-800/60 pt-4 space-y-3">
+              <h3 className="text-[11px] font-bold text-red-400 uppercase tracking-wider">Cấu hình riêng YouTube</h3>
+              <div className="space-y-1.5">
+                <label className="block text-[10px] text-slate-400 font-medium">Bảo mật</label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {PRIVACY_OPTIONS_YOUTUBE.map(opt => (
+                    <button
+                      key={opt.value} type="button" onClick={() => setYoutubePrivacy(opt.value)}
+                      className={`flex items-center justify-center gap-1.5 py-1.5 px-1 rounded-lg border text-[10px] font-medium transition-all cursor-pointer
+                        ${youtubePrivacy === opt.value ? 'border-red-500 bg-red-500/10 text-red-400 font-bold' : 'border-slate-800 bg-slate-950/30 text-slate-400'}`}
+                    >
+                      <span>{opt.icon}</span> {opt.label}
+                    </button>
+                  ))}
                 </div>
               </div>
-            )}
-
-            {/* KẾT QUẢ ĐỒNG BỘ */}
-            {result && (
-              <div className="p-3.5 bg-purple-500/5 border border-purple-500/20 rounded-xl text-[11px] space-y-2">
-                <p className="font-bold text-xs flex items-center gap-1.5 text-purple-400">
-                  <span>🚀</span> Kết quả phân phối đa nền tảng
-                </p>
-                <div className="space-y-1 bg-slate-950/80 p-2.5 rounded-lg border border-slate-800/60 text-slate-300 font-mono text-[10px]">
-                  <p>ID Giao dịch Zernio: <span className="text-white select-all">{result._id || result.id || 'N/A'}</span></p>
-                  {selectedPlatforms.tiktok && (
-                    <p className="border-t border-slate-800/60 pt-1.5 mt-1.5 flex items-center flex-wrap gap-1">
-                      <span>🎵 Kênh TikTok: </span>
-                      {tiktokProfileUrl ? (
-                        <a href={tiktokProfileUrl} target="_blank" rel="noopener noreferrer" className="text-pink-400 hover:underline font-bold">
-                          {tiktokProfileUrl} ↗️
-                        </a>
-                      ) : (
-                        <span className="text-slate-500 italic">⏳ Đang đợi TikTok tiếp nhận...</span>
-                      )}
-                    </p>
-                  )}
-                  {selectedPlatforms.youtube && (
-                    <p className="border-t border-slate-800/60 pt-1.5 mt-1.5 flex items-center flex-wrap gap-1">
-                      <span>📺 YT Studio Edit: </span>
-                      {youtubeStudioUrl ? (
-                        <a href={youtubeStudioUrl} target="_blank" rel="noopener noreferrer" className="text-red-400 hover:underline font-bold">
-                          {youtubeStudioUrl} ↗️
-                        </a>
-                      ) : (
-                        <span className="text-slate-500 italic">⏳ Đang đợi xử lý mã ID Video...</span>
-                      )}
-                    </p>
-                  )}
+              <div className="bg-slate-950/60 border border-slate-800/60 rounded-xl p-2.5 flex items-center justify-between text-[11px]">
+                <div>
+                  <p className="font-medium text-slate-300">Định dạng YouTube Shorts</p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">Ép luồng cho video dọc dưới 60 giây</p>
                 </div>
+                <input type="checkbox" checked={isShort} onChange={e => setIsShort(e.target.checked)} className="w-3.5 h-3.5 accent-red-500 cursor-pointer" />
               </div>
-            )}
+            </div>
 
             {error && (
               <div className="p-2.5 bg-red-500/10 border border-red-500/20 rounded-xl text-[11px] text-red-400 flex items-start gap-2">
@@ -601,9 +564,9 @@ export default function MultiPostDashboard() {
               </div>
             )}
 
-            {/* BUTTON SUBMIT FORM */}
+            {/* BUTTON ĐĂNG VIDEO - QUÉT FALSE */}
             <button
-              type="button" onClick={handlePublish} disabled={!isFormValid() || uploading}
+              type="button" onClick={handlePublishAndScan} disabled={uploading || rows.length === 0}
               className="w-full py-3.5 rounded-xl font-bold text-xs tracking-wider uppercase transition-all shadow-lg flex items-center justify-center gap-2 relative overflow-hidden cursor-pointer
                 bg-gradient-to-r from-purple-600 via-pink-600 to-red-500 hover:brightness-110 active:scale-[0.99]
                 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed disabled:shadow-none shadow-purple-900/20"
@@ -617,7 +580,7 @@ export default function MultiPostDashboard() {
                   <span className="font-medium text-xs normal-case tracking-normal text-white">{uploadStatus}</span>
                 </div>
               ) : (
-                <><span>⚡</span> Phát hành ngay đa nền tảng</>
+                <><span>⚡</span> ĐĂNG VIDEO (QUÉT FALSE & TỰ ĐỘNG UP)</>
               )}
             </button>
 
