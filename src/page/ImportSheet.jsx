@@ -211,7 +211,15 @@ export default function VideoUrlPicker() {
 
         if (videoUrl) URL.revokeObjectURL(videoUrl);
         setVideoFile(null);
-        setVideoUrl('');
+
+        // Kiểm tra xem có URL video trong hàng không (thường ở cột C - index 2)
+        const videoUrlFromRow = row.cells[2]?.trim() || '';
+        if (videoUrlFromRow && (videoUrlFromRow.startsWith('http') || videoUrlFromRow.includes('/videos/'))) {
+            setVideoUrl(videoUrlFromRow);
+        } else {
+            setVideoUrl('');
+        }
+
         setSaveMsg('');
         setSaveErr('');
     };
@@ -427,6 +435,13 @@ export default function VideoUrlPicker() {
                                             <video src={videoUrl} controls className="w-full max-h-[260px] object-contain" />
                                         </div>
                                     )}
+                                </div>
+                            )}
+
+                            {/* Hiển thị video từ Sheet nếu không có file local nhưng có URL */}
+                            {!videoFile && videoUrl && (
+                                <div className="bg-black border border-slate-800/80 rounded-xl overflow-hidden flex items-center justify-center min-h-[160px]">
+                                    <video src={videoUrl} controls className="w-full max-h-[260px] object-contain" />
                                 </div>
                             )}
                         </div>
