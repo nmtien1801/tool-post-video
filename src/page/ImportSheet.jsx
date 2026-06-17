@@ -1,10 +1,14 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 
-// ─── ENV ────────────────────────────────────────────────────────────────────
+// ─── ENV CONFIG ─────────────────────────────────────────────────────────────
 const MY_DOMAIN = import.meta.env?.VITE_REACT_URL || '';
 const GAPI_KEY = import.meta.env?.VITE_GOOGLE_API_KEY || '';
 const CLIENT_ID = import.meta.env?.VITE_GOOGLE_CLIENT_ID || '';
 const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
+
+// Cấu hình cứng URL và Tab mặc định thông qua file .env giống Dashboard
+const ENV_SHEET_URL = import.meta.env?.VITE_GOOGLE_SHEET_URL || '';
+const ENV_SHEET_TAB = import.meta.env?.VITE_GOOGLE_SHEET_TAB || 'Trang tính1';
 
 function parseSheetId(input) {
     const m = input.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
@@ -43,12 +47,11 @@ function AutoExpandingInput({ value, onChange, label }) {
     const adjustHeight = () => {
         const textarea = textareaRef.current;
         if (textarea) {
-            textarea.style.height = 'auto'; // Reset chiều cao thô trước
-            textarea.style.height = `${textarea.scrollHeight}px`; // Áp chiều cao thực theo text
+            textarea.style.height = 'auto'; 
+            textarea.style.height = `${textarea.scrollHeight}px`; 
         }
     };
 
-    // Co giãn ngay khi nội dung thay đổi hoặc khi nạp value mới (khi chọn hàng mới)
     useEffect(() => {
         adjustHeight();
     }, [value]);
@@ -65,7 +68,7 @@ function AutoExpandingInput({ value, onChange, label }) {
                     onChange(e.target.value);
                     adjustHeight();
                 }}
-                rows={1} // Mặc định chỉ chiếm góc nhỏ như 1 input thông thường
+                rows={1}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono focus:border-purple-500 focus:outline-none transition-all resize-none min-h-[34px] overflow-hidden leading-normal"
             />
         </div>
@@ -74,8 +77,9 @@ function AutoExpandingInput({ value, onChange, label }) {
 
 // ─── MAIN COMPONENT ─────────────────────────────────────────────────────────
 export default function VideoUrlPicker() {
-    const [sheetInput, setSheetInput] = useState('');
-    const [sheetTab, setSheetTab] = useState('Trang tính1');
+    // 🟢 Khởi tạo giá trị mặc định trực tiếp từ file .env
+    const [sheetInput, setSheetInput] = useState(() => ENV_SHEET_URL);
+    const [sheetTab, setSheetTab] = useState(() => ENV_SHEET_TAB);
 
     // ── Dynamic Sheet data
     const [dynamicHeaders, setDynamicHeaders] = useState([]);
@@ -147,12 +151,7 @@ export default function VideoUrlPicker() {
                     _row: i + 2,
                     cells: cells
                 };
-            }).filter(r => {
-                return r.cells.some(c => {
-                    const content = c.trim();
-                    return content !== '' && content !== 'FALSE';
-                });
-            });
+            }).filter(r => r.cells.some(c => c.trim() !== '' && c.trim() !== 'FALSE'));
 
             setRows(mapped);
         } catch (e) {
@@ -199,6 +198,16 @@ export default function VideoUrlPicker() {
         }
     };
 
+    // 🔥 TRIGGER TỰ ĐỘNG KẾT NỐI KHI VÀO TRANG (Đọc cấu hình sẵn từ file .env)
+    useEffect(() => {
+        if (sheetInput.trim() && !sheetLoading && !authed) {
+            const timer = setTimeout(() => {
+                handleConnect();
+            }, 400);
+            return () => clearTimeout(timer);
+        }
+    }, []);
+
     // ─── SELECT ROW ──────────────────────────────────────────────────────────
     const handleSelectRow = (row) => {
         setSelectedRow(row._row);
@@ -212,7 +221,6 @@ export default function VideoUrlPicker() {
         if (videoUrl) URL.revokeObjectURL(videoUrl);
         setVideoFile(null);
 
-        // Kiểm tra xem có URL video trong hàng không (thường ở cột C - index 2)
         const videoUrlFromRow = row.cells[2]?.trim() || '';
         if (videoUrlFromRow && (videoUrlFromRow.startsWith('http') || videoUrlFromRow.includes('/videos/'))) {
             setVideoUrl(videoUrlFromRow);
@@ -332,7 +340,7 @@ export default function VideoUrlPicker() {
                             />
                             <button
                                 type="button" onClick={handleConnect} disabled={!sheetInput.trim() || sheetLoading}
-                                className="shrink-0 px-5 py-2 rounded-xl font-bold text-xs bg-gradient-to-r from-purple-700 to-purple-500 hover:brightness-110 disabled:bg-slate-800 flex items-center gap-2"
+                                className="shrink-0 px-5 py-2 rounded-xl font-bold text-xs bg-gradient-to-r from-purple-700 to-purple-500 hover:brightness-110 disabled:bg-slate-800 flex items-center gap-2 cursor-pointer"
                             >
                                 {sheetLoading ? 'Đang xử lý...' : authed ? '🔄 Tải lại' : '🔗 Kết nối'}
                             </button>
@@ -438,7 +446,6 @@ export default function VideoUrlPicker() {
                                 </div>
                             )}
 
-                            {/* Hiển thị video từ Sheet nếu không có file local nhưng có URL */}
                             {!videoFile && videoUrl && (
                                 <div className="bg-black border border-slate-800/80 rounded-xl overflow-hidden flex items-center justify-center min-h-[160px]">
                                     <video src={videoUrl} controls className="w-full max-h-[260px] object-contain" />
@@ -446,19 +453,16 @@ export default function VideoUrlPicker() {
                             )}
                         </div>
 
-                        {/* ─── GRID LAYOUT 2 CỘT TỰ ĐỘNG CO GIÃN THEO CHỮ ĐƯỢC MAP ─── */}
+                        {/* GRID LAYOUT MAP TRƯỜNG DỮ LIỆU ĐỘNG */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {selectedRow && dynamicHeaders.map((head, index) => {
-                                const letter = String.fromCharCode(65 + index);
-                                return (
-                                    <AutoExpandingInput
-                                        key={index}
-                                        label={`${head || 'Trống'}`}
-                                        value={formData[index] || ''}
-                                        onChange={(val) => handleInputChange(index, val)}
-                                    />
-                                );
-                            })}
+                            {selectedRow && dynamicHeaders.map((head, index) => (
+                                <AutoExpandingInput
+                                    key={index}
+                                    label={`${head || 'Trống'}`}
+                                    value={formData[index] || ''}
+                                    onChange={(val) => handleInputChange(index, val)}
+                                />
+                            ))}
                         </div>
 
                         {saveMsg && <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-[11px] text-emerald-400">{saveMsg}</div>}
@@ -466,7 +470,7 @@ export default function VideoUrlPicker() {
 
                         <button
                             type="button" onClick={handleUpdate} disabled={!isFormFilled || saving}
-                            className={`w-full py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2
+                            className={`w-full py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer
                 ${isFormFilled && !saving ? 'bg-gradient-to-r from-purple-600 via-pink-600 to-red-500 hover:brightness-110 active:scale-[0.99]' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}
                         >
                             {saving ? '⏳ Đang ghi dữ liệu...' : '💾 Cập nhật lên Google Sheet'}

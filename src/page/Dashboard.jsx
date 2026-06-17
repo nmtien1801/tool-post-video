@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 
 const PRIVACY_OPTIONS_TIKTOK = [
   { value: 'PUBLIC_TO_EVERYONE', label: 'Công khai', icon: '🌍' },
@@ -13,31 +13,60 @@ const PRIVACY_OPTIONS_YOUTUBE = [
   { value: 'PRIVATE', label: 'Riêng tư', icon: '🔒' },
 ];
 
-// 📏 Cấu hình giới hạn dung lượng lưu trữ (Bytes)
-const MAX_SIZES = {
-  tiktok: 4 * 1024 * 1024 * 1024,   // 4 GB
-  youtube: 256 * 1024 * 1024 * 1024, // 256 GB
-};
-
+// ─── GOOGLE SHEET ENV CONFIG ───
 const MY_DOMAIN = import.meta.env?.VITE_REACT_URL || '';
+const GAPI_KEY = import.meta.env?.VITE_GOOGLE_API_KEY || '';
+const CLIENT_ID = import.meta.env?.VITE_GOOGLE_CLIENT_ID || '';
+const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
+
+function parseSheetId(input) {
+  const m = input.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  return m ? m[1] : input.trim();
+}
+
+function loadGapi() {
+  return new Promise((res, rej) => {
+    if (window.gapi) { window.gapi.load('client', res); return; }
+    const s = document.createElement('script');
+    s.src = 'https://apis.google.com/js/api.js';
+    s.onload = () => window.gapi.load('client', res);
+    s.onerror = rej;
+    document.head.appendChild(s);
+  });
+}
+
+function loadGis() {
+  return new Promise((res, rej) => {
+    if (window.google?.accounts) { res(); return; }
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+}
 
 export default function MultiPostDashboard() {
-  // 📁 STATE: MEDIA (Cột Trái)
-  const [videoFile, setVideoFile] = useState(null);
+  // ── Google Sheet States (Nạp cấu hình mặc định thẳng từ file .env) ──
+  const [sheetInput, setSheetInput] = useState(() => import.meta.env?.VITE_GOOGLE_SHEET_URL || '');
+  const [sheetTab, setSheetTab] = useState(() => import.meta.env?.VITE_GOOGLE_SHEET_TAB || 'Trang tính1');
+  const [dynamicHeaders, setDynamicHeaders] = useState([]);
+  const [rows, setRows] = useState([]);
+  const [selectedRow, setSelectedRow] = useState(null);
+  const [sheetLoading, setSheetLoading] = useState(false);
+  const [sheetError, setSheetError] = useState('');
+  const [authed, setAuthed] = useState(false);
+  const [sheetId, setSheetId] = useState('');
+
+  // ── Core Publish States ──
   const [videoUrl, setVideoUrl] = useState('');
-  const [dragging, setDragging] = useState(false);
+  const [title, setTitle] = useState('');
+  const [caption, setCaption] = useState('');
 
-  // 📝 STATE: THÔNG TIN NỘI DUNG (Cột Trái)
-  const [title, setTitle] = useState('');     // Dùng cho YouTube
-  const [caption, setCaption] = useState(''); // Dùng chung (Description/Caption)
-
-  // 🌐 STATE: CHỌN NỀN TẢNG (Cột Phải)
   const [selectedPlatforms, setSelectedPlatforms] = useState({
-    tiktok: true,
+    tiktok: false,
     youtube: false,
   });
 
-  // 🔑 TOKENS & ACCOUNTS
   const [apiKeys] = useState({
     tiktok: import.meta.env?.VITE_ZERNIO_API_KEY_TIKTOK || '',
     youtube: import.meta.env?.VITE_ZERNIO_API_KEY_YOUTUBE || '',
@@ -47,7 +76,6 @@ export default function MultiPostDashboard() {
     youtube: import.meta.env?.VITE_YOUTUBE_ACCOUNT_ID || '',
   });
 
-  // ⚙️ STATE: CẤU HÌNH TIKTOK
   const [tiktokPrivacy, setTiktokPrivacy] = useState('PUBLIC_TO_EVERYONE');
   const [allowComment, setAllowComment] = useState(true);
   const [allowDuet, setAllowDuet] = useState(true);
@@ -55,53 +83,133 @@ export default function MultiPostDashboard() {
   const [aiDisclosure, setAiDisclosure] = useState(false);
   const [coverMs, setCoverMs] = useState(1000);
 
-  // ⚙️ STATE: CẤU HÌNH YOUTUBE
   const [youtubePrivacy, setYoutubePrivacy] = useState('PUBLIC');
   const [isShort, setIsShort] = useState(false);
 
-  // 🔄 STATE: HỆ THỐNG TRẠNG THÁI
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState('');
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
 
-  // --- XỬ LÝ FILE ---
-  const handleFileSelect = (file) => {
-    if (file && file.type.startsWith('video/')) {
-      setVideoFile(file);
-      setVideoUrl(URL.createObjectURL(file));
-      setError(null);
-      setResult(null);
+  // ─── FETCH GOOGLE SHEET DATA ───
+  const fetchRows = useCallback(async (token, sid) => {
+    const id = sid || sheetId;
+    if (!id) return;
+    setSheetLoading(true);
+    setSheetError('');
+    setRows([]);
+    setDynamicHeaders([]);
+    setSelectedRow(null);
 
-      // Tự động bỏ chọn các nền tảng bị quá giới hạn kích thước file mới tải lên
-      setSelectedPlatforms(prev => ({
-        tiktok: file.size <= MAX_SIZES.tiktok ? prev.tiktok : false,
-        youtube: file.size <= MAX_SIZES.youtube ? prev.youtube : false,
-      }));
+    try {
+      const range = `${sheetTab}!A:Z`;
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${encodeURIComponent(range)}`;
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error?.message || 'Không đọc được dải ô dữ liệu hệ thống.');
+
+      const values = data.values || [];
+      if (!values.length) throw new Error('Sheet trống.');
+
+      const headerRow = values[0] || [];
+      setDynamicHeaders(headerRow);
+
+      const mapped = values.slice(1).map((row, i) => {
+        const cells = headerRow.map((_, colIdx) => row[colIdx] || '');
+        return { _row: i + 2, cells: cells };
+      }).filter(r => r.cells.some(c => c.trim() !== '' && c.trim() !== 'FALSE'));
+
+      setRows(mapped);
+    } catch (e) {
+      setSheetError(e.message);
+    } finally {
+      setSheetLoading(false);
+    }
+  }, [sheetTab, sheetId]);
+
+  const handleConnect = async () => {
+    setSheetError('');
+    setSheetLoading(true);
+    const sid = parseSheetId(sheetInput);
+    if (!sid) { setSheetError('Nhập URL hoặc ID của Google Sheet.'); setSheetLoading(false); return; }
+    setSheetId(sid);
+
+    try {
+      await Promise.all([loadGapi(), loadGis()]);
+      await window.gapi.client.init({
+        apiKey: GAPI_KEY,
+        discoveryDocs: ['https://sheets.googleapis.com/$discovery/rest?version=v4'],
+      });
+
+      if (authed && window._gToken) {
+        await fetchRows(window._gToken, sid);
+        return;
+      }
+
+      const tc = window.google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: SCOPES,
+        callback: async (resp) => {
+          if (resp.error) { setSheetError('Xác thực thất bại: ' + resp.error); setSheetLoading(false); return; }
+          window._gToken = resp.access_token;
+          setAuthed(true);
+          await fetchRows(resp.access_token, sid);
+        },
+      });
+      tc.requestAccessToken();
+    } catch (e) {
+      setSheetError('Lỗi Google API: ' + (e.message || e));
+      setSheetLoading(false);
     }
   };
 
-  const handleDrop = (e) => {
-    e.preventDefault();
-    setDragging(false);
-    handleFileSelect(e.dataTransfer.files[0]);
+  // 🔥 TRIGGER TỰ ĐỘNG KẾT NỐI KHI KHỞI CHẠY APP
+  useEffect(() => {
+    if (sheetInput.trim() && !sheetLoading && !authed) {
+      const timer = setTimeout(() => {
+        handleConnect();
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  // ─── MAP DATA CHUẨN XÁC KHI TRÍCH XUẤT HÀNG MATRIX ───
+  const handleSelectRow = (row) => {
+    setSelectedRow(row._row);
+    setError(null);
+    setResult(null);
+
+    // 1. Cột B (Index 1) trên UI đề chữ [Link url] / tương đương Cột C thực tế trên Sheet: Lấy URL Video để Post
+    const videoUrlFromRow = row.cells[1]?.trim() || '';
+    if (videoUrlFromRow && (videoUrlFromRow.startsWith('http') || videoUrlFromRow.includes('/videos/'))) {
+      setVideoUrl(videoUrlFromRow);
+    } else {
+      setVideoUrl('');
+    }
+
+    // 2. Cột C (Index 2): Map tiêu đề Video gốc lên trường YouTube Title
+    setTitle(row.cells[2] || '');
+
+    // 3. Cột D (Index 3): Map Caption / Mô tả nội dung bài đăng
+    setCaption(row.cells[3] || '');
+
+    // 4. Trạng thái Checkbox
+    const isTiktokChecked = row.cells[5]?.trim().toUpperCase() === 'TRUE';
+    const isYtbChecked = row.cells[6]?.trim().toUpperCase() === 'TRUE';
+
+    setSelectedPlatforms({
+      tiktok: isTiktokChecked,
+      youtube: isYtbChecked
+    });
   };
 
   const togglePlatform = (platform) => {
-    // Chỉ cho phép bật chọn nếu dung lượng file thỏa mãn kích thước tối đa
-    if (videoFile && videoFile.size > MAX_SIZES[platform]) return;
     setSelectedPlatforms(prev => ({ ...prev, [platform]: !prev[platform] }));
   };
 
-  // --- VALIDATION ---
   const isFormValid = () => {
-    if (!videoFile || caption.trim().length === 0) return false;
+    if (!videoUrl || caption.trim().length === 0) return false;
     if (!selectedPlatforms.tiktok && !selectedPlatforms.youtube) return false;
-
-    // Kiểm tra chặn cứng nếu kích thước tệp vượt ngưỡng của nền tảng được chọn
-    if (selectedPlatforms.tiktok && videoFile.size > MAX_SIZES.tiktok) return false;
-    if (selectedPlatforms.youtube && videoFile.size > MAX_SIZES.youtube) return false;
-
     if (selectedPlatforms.tiktok) {
       if (!apiKeys.tiktok || !accountIds.tiktok) return false;
     }
@@ -111,7 +219,7 @@ export default function MultiPostDashboard() {
     return true;
   };
 
-  // --- PUBLISH THỰC THI ---
+  // ─── XỬ LÝ PHÁT HÀNH TRUYỀN THÔNG ───
   const handlePublish = async () => {
     if (!isFormValid() || uploading) return;
     setUploading(true);
@@ -119,20 +227,17 @@ export default function MultiPostDashboard() {
     setResult(null);
 
     try {
-      setUploadStatus('1/2: Đang đồng bộ video từ Local Server...');
+      setUploadStatus('1/2: Đang cấu hình liên kết video từ Matrix...');
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      const fileName = videoFile.name;
-      const publicHttpsUrl = `${MY_DOMAIN}/videos/${fileName}`;
+      // URL bài đăng lấy trực tiếp từ cột Link url của dòng được chọn
+      const publicHttpsUrl = videoUrl;
 
       setUploadStatus('2/2: Đang phân phối dữ liệu đa nền tảng...');
 
       const platformsPayload = [];
       if (selectedPlatforms.tiktok) {
-        platformsPayload.push({
-          platform: 'tiktok',
-          accountId: accountIds.tiktok.trim()
-        });
+        platformsPayload.push({ platform: 'tiktok', accountId: accountIds.tiktok.trim() });
       }
       if (selectedPlatforms.youtube) {
         platformsPayload.push({
@@ -165,9 +270,7 @@ export default function MultiPostDashboard() {
           }
         } : {}),
         ...(selectedPlatforms.youtube ? {
-          youtubeSettings: {
-            is_shorts: isShort,
-          }
+          youtubeSettings: { is_shorts: isShort }
         } : {})
       };
 
@@ -205,12 +308,8 @@ export default function MultiPostDashboard() {
             const isTkDone = !selectedPlatforms.tiktok || tkData?.status === 'published' || tkData?.username || tkData?.accountId?.username;
             const isYtDone = !selectedPlatforms.youtube || ytData?.status === 'published' || ytData?.platformPostId;
 
-            if (isTkDone && isYtDone) {
-              postData = refreshed;
-              break;
-            } else {
-              postData = refreshed;
-            }
+            if (isTkDone && isYtDone) { postData = refreshed; break; }
+            else { postData = refreshed; }
           } catch (_) { }
         }
       }
@@ -226,16 +325,10 @@ export default function MultiPostDashboard() {
 
   const tiktokData = result?.platforms?.find(p => p.platform === 'tiktok');
   const youtubeData = result?.platforms?.find(p => p.platform === 'youtube');
-
   const tkUsername = tiktokData?.accountId?.username || tiktokData?.username || tiktokData?.tiktokUsername || null;
   const tiktokProfileUrl = tkUsername ? `https://www.tiktok.com/@${tkUsername}` : null;
-
   const ytVideoId = youtubeData?.platformPostId || null;
   const youtubeStudioUrl = ytVideoId ? `https://studio.youtube.com/video/${ytVideoId}/edit` : null;
-
-  // Biến kiểm tra vượt dung lượng để hiển thị UI thông minh
-  const isTiktokOversized = videoFile && videoFile.size > MAX_SIZES.tiktok;
-  const isYoutubeOversized = videoFile && videoFile.size > MAX_SIZES.youtube;
 
   return (
     <div className="min-h-screen bg-[#0d0e15] text-slate-100 font-sans p-6 relative overflow-x-hidden">
@@ -243,95 +336,142 @@ export default function MultiPostDashboard() {
       <div className="absolute bottom-0 left-1/4 w-[500px] h-[500px] bg-pink-500/5 blur-[150px] rounded-full pointer-events-none" />
 
       {/* Header */}
-      <div className="max-w-7xl mx-auto flex items-center justify-between border-b border-slate-800 pb-4 mb-6">
+      <div className="max-w-[1600px] mx-auto flex items-center justify-between border-b border-slate-800 pb-4 mb-6">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-purple-600 via-pink-500 to-red-400 flex items-center justify-center font-bold shadow-lg shadow-purple-500/20">
-            🚀
-          </div>
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-purple-600 via-pink-500 to-red-400 flex items-center justify-center font-bold shadow-lg shadow-purple-500/20">🚀</div>
           <div>
             <h1 className="text-lg font-black tracking-tight">Creatimic Studio Multi-Poster</h1>
-            <p className="text-[11px] text-slate-500">Phát hành Video đa nền tảng đồng thời</p>
+            <p className="text-[11px] text-slate-500">Phát hành đa nền tảng kết hợp Đồng bộ Matrix Google Sheet</p>
           </div>
         </div>
         <div className="text-[11px] font-mono text-slate-400 px-3 py-1 bg-slate-900 rounded-full border border-slate-800">
-          Cross-Platform Core
+          Integrated Matrix Engine
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div className="max-w-[1600px] mx-auto grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
 
-        {/* CỘT TRÁI (5/12) */}
-        <div className="lg:col-span-5 space-y-4">
-          <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-4 backdrop-blur-md space-y-5 flex flex-col">
-
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                  <span>📁</span> Tệp tin Video gốc
-                </h2>
-                {videoFile && (
-                  <button
-                    type="button"
-                    onClick={() => document.getElementById('multi-file-input').click()}
-                    className="text-[11px] font-medium text-purple-400 bg-purple-500/10 border border-purple-500/20 hover:bg-purple-500/20 px-2.5 py-1 rounded-lg transition-all"
-                  >
-                    🔄 Đổi file khác
-                  </button>
-                )}
-              </div>
-
+        {/* ── CỘT TRÁI (7/12): Chỉ gồm Box Kết Nối + Bảng dữ liệu Matrix ── */}
+        <div className="xl:col-span-7 space-y-4">
+          
+          {/* Kết nối Google Sheet */}
+          <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-4 backdrop-blur-md space-y-3">
+            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+              <span>📊</span> Kết nối Google Sheet
+            </h2>
+            <div className="flex flex-col sm:flex-row gap-2">
               <input
-                id="multi-file-input"
-                type="file"
-                accept="video/mp4,video/mov,video/webm"
-                className="hidden"
-                onChange={(e) => e.target.files[0] && handleFileSelect(e.target.files[0])}
+                type="text" value={sheetInput}
+                onChange={e => setSheetInput(e.target.value)}
+                placeholder="https://docs.google.com/spreadsheets/d/..."
+                className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-purple-500 focus:outline-none"
               />
+              <input
+                type="text" value={sheetTab} onChange={e => setSheetTab(e.target.value)}
+                placeholder="Trang tính1"
+                className="w-full sm:w-28 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-center focus:border-purple-500 focus:outline-none"
+              />
+              <button
+                type="button" onClick={handleConnect} disabled={!sheetInput.trim() || sheetLoading}
+                className="shrink-0 px-5 py-2 rounded-xl font-bold text-xs bg-gradient-to-r from-purple-700 to-purple-500 hover:brightness-110 disabled:bg-slate-800 flex items-center gap-2 cursor-pointer"
+              >
+                {sheetLoading ? 'Đang xử lý...' : authed ? '🔄 Tải lại' : '🔗 Kết nối'}
+              </button>
+            </div>
+            {sheetError && <div className="p-2.5 bg-red-500/10 border border-red-500/20 rounded-xl text-[11px] text-red-400">⚠️ {sheetError}</div>}
+          </div>
 
-              {!videoFile ? (
-                <div
-                  onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-                  onDragLeave={() => setDragging(false)}
-                  onDrop={handleDrop}
-                  onClick={() => document.getElementById('multi-file-input').click()}
-                  className={`border border-dashed rounded-xl p-6 flex flex-col items-center justify-center gap-3 text-center cursor-pointer transition-all min-h-[180px]
-                    ${dragging ? 'border-purple-500 bg-purple-500/10' : 'border-slate-800 hover:border-slate-700 bg-slate-950/40'}`}
+          {/* Bảng hiển thị Dữ liệu Google Sheet */}
+          {rows.length > 0 && (
+            <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl overflow-hidden backdrop-blur-md">
+              <div className="p-3 bg-slate-950/40 border-b border-slate-800/60 flex justify-between items-center">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">📑 DỮ LIỆU HÀNG</span>
+                {selectedRow && <span className="text-[10px] bg-purple-500/20 text-purple-400 font-bold px-2 py-0.5 rounded-md">Đang chọn dòng #{selectedRow}</span>}
+              </div>
+              <div className="overflow-x-auto max-h-[500px]">
+                <table className="w-full text-[11px]">
+                  <thead className="sticky top-0 bg-slate-950 z-10 shadow-sm">
+                    <tr className="border-b border-slate-800/60 text-slate-400">
+                      <th className="px-3 py-2.5 text-left w-12 bg-slate-950">#</th>
+                      {dynamicHeaders.map((head, index) => (
+                        <th key={index} className="px-3 py-2.5 text-left font-semibold bg-slate-950">{head || 'Trống'}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row) => {
+                      const active = selectedRow === row._row;
+                      return (
+                        <tr
+                          key={row._row} onClick={() => handleSelectRow(row)}
+                          className={`border-b border-slate-800/30 cursor-pointer transition-all ${active ? 'bg-purple-500/10' : 'hover:bg-slate-800/30'}`}
+                        >
+                          <td className={`px-3 py-2 font-mono ${active ? 'text-purple-400 font-bold' : 'text-slate-600'}`}>{row._row}</td>
+                          {row.cells.map((cellValue, cellIdx) => (
+                            <td key={cellIdx} className={`px-3 py-2 max-w-[160px] truncate ${active ? 'text-slate-200' : 'text-slate-400'}`}>
+                              {cellValue || <span className="text-slate-700 italic">—</span>}
+                            </td>
+                          ))}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── CỘT PHẢI (5/12): Form điều khiển và cấu hình xuất bản ── */}
+        <div className="xl:col-span-5 space-y-4">
+          <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 backdrop-blur-md space-y-5">
+
+            {/* PHẦN CHỌN NỀN TẢNG PHÁT HÀNH */}
+            <div>
+              <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2.5 flex items-center gap-2">
+                <span>🔗</span> Nền tảng phát hành (Cột G & H)
+              </h2>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button" onClick={() => togglePlatform('tiktok')}
+                  className={`flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl border text-xs font-bold transition-all relative cursor-pointer
+                    ${selectedPlatforms.tiktok ? 'border-pink-500 bg-pink-500/10 text-pink-400' : 'border-slate-800 bg-slate-950/40 text-slate-500 hover:border-slate-700'}`}
                 >
-                  <div className="w-10 h-10 rounded-lg bg-slate-800 flex items-center justify-center text-xl text-slate-400">📹</div>
-                  <div>
-                    <p className="font-medium text-xs text-slate-300">Kéo thả hoặc chọn file video</p>
-                    <p className="text-[10px] text-slate-500 mt-0.5">Yêu cầu file lưu sẵn trong mục "public_videos"</p>
+                  <div className="flex items-center gap-2">
+                    <span>🎵</span> TikTok
                   </div>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="bg-slate-950/60 border border-slate-800/60 p-2.5 rounded-xl flex items-center gap-3">
-                    <div className="w-7 h-7 rounded-md bg-purple-500/10 flex items-center justify-center text-sm text-purple-400 shrink-0">🎬</div>
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium text-xs text-slate-200 truncate">{videoFile.name}</p>
-                      <p className="text-[10px] text-slate-500">{(videoFile.size / 1024 / 1024).toFixed(1)} MB</p>
-                    </div>
+                  <input type="checkbox" checked={selectedPlatforms.tiktok} readOnly className="rounded accent-pink-500 mt-1 sm:mt-0" />
+                </button>
+
+                <button
+                  type="button" onClick={() => togglePlatform('youtube')}
+                  className={`flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl border text-xs font-bold transition-all relative cursor-pointer
+                    ${selectedPlatforms.youtube ? 'border-red-500 bg-red-500/10 text-red-400' : 'border-slate-800 bg-slate-950/40 text-slate-500 hover:border-slate-700'}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span>📺</span> YouTube
                   </div>
-                  {videoUrl && (
-                    <div className="bg-black border border-slate-800/80 rounded-xl overflow-hidden shadow-inner flex items-center justify-center min-h-[240px]">
-                      <video src={videoUrl} controls className="w-full max-h-[400px] object-contain" />
-                    </div>
-                  )}
-                </div>
-              )}
+                  <input type="checkbox" checked={selectedPlatforms.youtube} readOnly className="rounded accent-red-500 mt-1 sm:mt-0" />
+                </button>
+              </div>
             </div>
 
-            <div className="border-t border-slate-800/60 pt-4 space-y-4">
+            {/* INPUTS ĐƯỢC MAP DỮ LIỆU */}
+            <div className="border-t border-slate-800/60 pt-4 space-y-3">
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                <span>✏️</span> Cấu hình Nội dung đăng
+              </h3>
+
               {selectedPlatforms.youtube && (
                 <div className="space-y-1">
                   <div className="flex justify-between items-center">
-                    <label className="block text-xs text-slate-400 font-medium">Tiêu đề Video (YouTube Title) <span className="text-red-500">*</span></label>
+                    <label className="block text-xs text-slate-400 font-medium">
+                      Tiêu đề Video (YouTube Title) <span className="text-purple-400 font-mono text-[10px]">[Cột C]</span> <span className="text-red-500">*</span>
+                    </label>
                     <span className="text-[10px] font-mono text-slate-600">{title.length}/100</span>
                   </div>
                   <input
-                    type="text"
-                    value={title}
-                    onChange={e => setTitle(e.target.value.slice(0, 100))}
+                    type="text" value={title} onChange={e => setTitle(e.target.value.slice(0, 100))}
                     placeholder="Nhập tiêu đề bắt buộc cho YouTube..."
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-red-500 focus:outline-none transition-all"
                   />
@@ -340,76 +480,21 @@ export default function MultiPostDashboard() {
 
               <div className="space-y-1">
                 <div className="flex justify-between items-center">
-                  <label className="block text-xs text-slate-400 font-medium">Nội dung mô tả chính (Caption / Description)</label>
+                  <label className="block text-xs text-slate-400 font-medium">
+                    Caption / Mô tả nội dung <span className="text-purple-400 font-mono text-[10px]">[Cột D]</span>
+                  </label>
                   <span className="text-[10px] font-mono text-slate-600">{caption.length}/2200</span>
                 </div>
                 <textarea
-                  value={caption}
-                  onChange={e => setCaption(e.target.value.slice(0, 2200))}
-                  placeholder="Viết mô tả hoặc caption nội dung chung cho các kênh..."
-                  rows={4}
+                  value={caption} onChange={e => setCaption(e.target.value.slice(0, 2200))}
+                  placeholder="Viết mô tả hoặc caption nội dung chung cho các kênh..." rows={4}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs resize-none focus:border-purple-500 focus:outline-none transition-all"
                 />
               </div>
             </div>
 
-          </div>
-        </div>
-
-        {/* CỘT PHẢI (7/12) */}
-        <div className="lg:col-span-7 space-y-4">
-          <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 backdrop-blur-md space-y-5">
-
-            {/* CẢNH BÁO LỖI ENV */}
-            {((selectedPlatforms.tiktok && (!apiKeys.tiktok || !accountIds.tiktok)) ||
-              (selectedPlatforms.youtube && (!apiKeys.youtube || !accountIds.youtube))) && (
-                <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[11px] text-amber-400">
-                  ⚠️ <strong>Cảnh báo:</strong> Thông tin Account ID hoặc Token trong file <code>.env</code> bị thiếu cho nền tảng đã chọn.
-                </div>
-              )}
-
-            {/* CHỌN KÊNH PHÂN PHỐI */}
-            <div>
-              <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2.5 flex items-center gap-2">
-                <span>🔗</span> Chọn nền tảng phát hành
-              </h2>
-              <div className="grid grid-cols-2 gap-3">
-                {/* BUTTON TIKTOK */}
-                <button
-                  type="button"
-                  disabled={isTiktokOversized}
-                  onClick={() => togglePlatform('tiktok')}
-                  className={`flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl border text-xs font-bold transition-all relative
-                    ${isTiktokOversized ? 'border-slate-800/40 bg-slate-950/20 text-slate-600 cursor-not-allowed' :
-                      selectedPlatforms.tiktok ? 'border-pink-500 bg-pink-500/10 text-pink-400' : 'border-slate-800 bg-slate-950/40 text-slate-500 hover:border-slate-700'}`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span>🎵</span> TikTok
-                    {isTiktokOversized && <span className="text-[9px] text-red-500 font-normal bg-red-500/10 px-1.5 py-0.5 rounded ml-1">Quá 4GB</span>}
-                  </div>
-                  {!isTiktokOversized && <input type="checkbox" checked={selectedPlatforms.tiktok} readOnly className="rounded accent-pink-500 mt-1 sm:mt-0" />}
-                </button>
-
-                {/* BUTTON YOUTUBE */}
-                <button
-                  type="button"
-                  disabled={isYoutubeOversized}
-                  onClick={() => togglePlatform('youtube')}
-                  className={`flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl border text-xs font-bold transition-all relative
-                    ${isYoutubeOversized ? 'border-slate-800/40 bg-slate-950/20 text-slate-600 cursor-not-allowed' :
-                      selectedPlatforms.youtube ? 'border-red-500 bg-red-500/10 text-red-400' : 'border-slate-800 bg-slate-950/40 text-slate-500 hover:border-slate-700'}`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span>📺</span> YouTube
-                    {isYoutubeOversized && <span className="text-[9px] text-red-500 font-normal bg-red-500/10 px-1.5 py-0.5 rounded ml-1">Quá 256GB</span>}
-                  </div>
-                  {!isYoutubeOversized && <input type="checkbox" checked={selectedPlatforms.youtube} readOnly className="rounded accent-red-500 mt-1 sm:mt-0" />}
-                </button>
-              </div>
-            </div>
-
-            {/* TIKTOK SETTINGS */}
-            {selectedPlatforms.tiktok && !isTiktokOversized && (
+            {/* CẤU HÌNH CHI TIẾT TIKTOK */}
+            {selectedPlatforms.tiktok && (
               <div className="border-t border-slate-800/60 pt-4 space-y-3">
                 <h3 className="text-[11px] font-bold text-pink-400 uppercase tracking-wider">Cấu hình riêng TikTok</h3>
                 <div className="space-y-1.5">
@@ -418,7 +503,7 @@ export default function MultiPostDashboard() {
                     {PRIVACY_OPTIONS_TIKTOK.map(opt => (
                       <button
                         key={opt.value} type="button" onClick={() => setTiktokPrivacy(opt.value)}
-                        className={`flex items-center justify-center gap-1 py-1.5 px-1 rounded-lg border text-[10px] font-medium transition-all
+                        className={`flex items-center justify-center gap-1 py-1.5 px-1 rounded-lg border text-[10px] font-medium transition-all cursor-pointer
                           ${tiktokPrivacy === opt.value ? 'border-pink-500/60 bg-pink-500/10 text-pink-400 font-bold' : 'border-slate-800 bg-slate-950/30 text-slate-400'}`}
                       >
                         <span>{opt.icon}</span> <span className="truncate">{opt.label}</span>
@@ -435,7 +520,7 @@ export default function MultiPostDashboard() {
                   ].map((item, idx) => (
                     <div key={idx} className="flex items-center justify-between text-[11px] py-0.5">
                       <span className="text-slate-400">{item.label}</span>
-                      <input type="checkbox" checked={item.checked} onChange={e => item.onChange(e.target.checked)} className="w-3 h-3 accent-pink-500" />
+                      <input type="checkbox" checked={item.checked} onChange={e => item.onChange(e.target.checked)} className="w-3 h-3 accent-pink-500 cursor-pointer" />
                     </div>
                   ))}
                 </div>
@@ -446,8 +531,8 @@ export default function MultiPostDashboard() {
               </div>
             )}
 
-            {/* YOUTUBE SETTINGS */}
-            {selectedPlatforms.youtube && !isYoutubeOversized && (
+            {/* CẤU HÌNH CHI TIẾT YOUTUBE */}
+            {selectedPlatforms.youtube && (
               <div className="border-t border-slate-800/60 pt-4 space-y-3">
                 <h3 className="text-[11px] font-bold text-red-400 uppercase tracking-wider">Cấu hình riêng YouTube</h3>
                 <div className="space-y-1.5">
@@ -456,7 +541,7 @@ export default function MultiPostDashboard() {
                     {PRIVACY_OPTIONS_YOUTUBE.map(opt => (
                       <button
                         key={opt.value} type="button" onClick={() => setYoutubePrivacy(opt.value)}
-                        className={`flex items-center justify-center gap-1.5 py-1.5 px-1 rounded-lg border text-[10px] font-medium transition-all
+                        className={`flex items-center justify-center gap-1.5 py-1.5 px-1 rounded-lg border text-[10px] font-medium transition-all cursor-pointer
                           ${youtubePrivacy === opt.value ? 'border-red-500 bg-red-500/10 text-red-400 font-bold' : 'border-slate-800 bg-slate-950/30 text-slate-400'}`}
                       >
                         <span>{opt.icon}</span> {opt.label}
@@ -469,12 +554,12 @@ export default function MultiPostDashboard() {
                     <p className="font-medium text-slate-300">Định dạng YouTube Shorts</p>
                     <p className="text-[10px] text-slate-500 mt-0.5">Ép luồng cho video dọc dưới 60 giây</p>
                   </div>
-                  <input type="checkbox" checked={isShort} onChange={e => setIsShort(e.target.checked)} className="w-3.5 h-3.5 accent-red-500" />
+                  <input type="checkbox" checked={isShort} onChange={e => setIsShort(e.target.checked)} className="w-3.5 h-3.5 accent-red-500 cursor-pointer" />
                 </div>
               </div>
             )}
 
-            {/* BẢNG KẾT QUẢ ĐA KÊNH */}
+            {/* KẾT QUẢ ĐỒNG BỘ */}
             {result && (
               <div className="p-3.5 bg-purple-500/5 border border-purple-500/20 rounded-xl text-[11px] space-y-2">
                 <p className="font-bold text-xs flex items-center gap-1.5 text-purple-400">
@@ -482,19 +567,6 @@ export default function MultiPostDashboard() {
                 </p>
                 <div className="space-y-1 bg-slate-950/80 p-2.5 rounded-lg border border-slate-800/60 text-slate-300 font-mono text-[10px]">
                   <p>ID Giao dịch Zernio: <span className="text-white select-all">{result._id || result.id || 'N/A'}</span></p>
-
-                  <p className="truncate">
-                    Link video nội bộ:{' '}
-                    <a
-                      href={`${MY_DOMAIN}/videos/${videoFile?.name}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="font-mono text-red-400 hover:underline inline-block max-w-[70%] truncate align-bottom text-[10px]"
-                    >
-                      {MY_DOMAIN}/videos/{videoFile?.name}
-                    </a>
-                  </p>
-
                   {selectedPlatforms.tiktok && (
                     <p className="border-t border-slate-800/60 pt-1.5 mt-1.5 flex items-center flex-wrap gap-1">
                       <span>🎵 Kênh TikTok: </span>
@@ -507,7 +579,6 @@ export default function MultiPostDashboard() {
                       )}
                     </p>
                   )}
-
                   {selectedPlatforms.youtube && (
                     <p className="border-t border-slate-800/60 pt-1.5 mt-1.5 flex items-center flex-wrap gap-1">
                       <span>📺 YT Studio Edit: </span>
@@ -530,10 +601,10 @@ export default function MultiPostDashboard() {
               </div>
             )}
 
-            {/* BUTTON SUBMIT */}
+            {/* BUTTON SUBMIT FORM */}
             <button
               type="button" onClick={handlePublish} disabled={!isFormValid() || uploading}
-              className="w-full py-3.5 rounded-xl font-bold text-xs tracking-wider uppercase transition-all shadow-lg flex items-center justify-center gap-2 relative overflow-hidden
+              className="w-full py-3.5 rounded-xl font-bold text-xs tracking-wider uppercase transition-all shadow-lg flex items-center justify-center gap-2 relative overflow-hidden cursor-pointer
                 bg-gradient-to-r from-purple-600 via-pink-600 to-red-500 hover:brightness-110 active:scale-[0.99]
                 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed disabled:shadow-none shadow-purple-900/20"
             >
@@ -546,9 +617,7 @@ export default function MultiPostDashboard() {
                   <span className="font-medium text-xs normal-case tracking-normal text-white">{uploadStatus}</span>
                 </div>
               ) : (
-                <>
-                  <span>⚡</span> Phát hành ngay đa nền tảng
-                </>
+                <><span>⚡</span> Phát hành ngay đa nền tảng</>
               )}
             </button>
 
