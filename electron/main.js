@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, dialog } from "electron";
+import { app, BrowserWindow, ipcMain, shell, dialog, Menu } from "electron";
 import path from "path";
 import { fileURLToPath } from "url";
 import os from "os";
@@ -120,6 +120,40 @@ const createWindow = () => {
 
   mainWindow.loadURL(startUrl);
   if (isDev) mainWindow.webContents.openDevTools();
+
+  // ─── Menu Bar ───
+  const menuTemplate = [
+    {
+      label: "File",
+      submenu: [{ label: "Thoát", role: "quit" }],
+    },
+    {
+      label: "Trang", // 👈 phải có cái này
+      submenu: [
+        {
+          label: "Trang chủ",
+          click: () => mainWindow.webContents.send("navigate", "/dashboard"),
+        },
+        {
+          label: "Quản trị dữ liệu",
+          click: () => mainWindow.webContents.send("navigate", "/import-sheet"),
+        },
+      ],
+    },
+  ];
+
+  if (isDev) {
+    menuTemplate.push({
+      label: "Dev",
+      submenu: [
+        { label: "Reload", role: "reload" },
+        { label: "DevTools", role: "toggleDevTools" },
+      ],
+    });
+  }
+
+  const menu = Menu.buildFromTemplate(menuTemplate);
+  Menu.setApplicationMenu(menu);
 };
 
 // ─────────────────────────────────────────────
