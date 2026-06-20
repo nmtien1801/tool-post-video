@@ -4,6 +4,9 @@ import { contextBridge, ipcRenderer } from "electron";
 let navigateListener = null;
 
 contextBridge.exposeInMainWorld("electronAPI", {
+  // ── ĐÃ THÊM: Hàm cầu nối trung gian gửi gói JSON an toàn xuống Main Process ──
+  sendToBackend: (endpoint, body) => ipcRenderer.invoke("call-backend-api", { endpoint, body }),
+
   // Lấy thông tin Hardware Encoder (GPU) từ hệ thống
   detectHwEncoder: () => ipcRenderer.invoke("detect-hw-encoder"),
 

@@ -37,7 +37,15 @@
       "output": "release"
     },
     "asar": true,
+    "asarUnpack": [
+      "**/node_modules/ffmpeg-static/ffmpeg.exe",
+      "**/node_modules/ffprobe-static/bin/**/*"
+    ],
     "extraResources": [
+      {
+        "from": "server",
+        "to": "server"
+      },
       {
         "from": "resources/ffmpeg.exe",
         "to": "ffmpeg.exe"
@@ -51,28 +59,23 @@
         "to": "public_videos"
       },
       {
-        "from": "server",
-        "to": "server"
-      },
-      {
         "from": "cloudflared.exe",
         "to": "cloudflared.exe"
       }
-    ],
-    "asarUnpack": [
-      "**/node_modules/ffmpeg-static/ffmpeg.exe",
-      "**/node_modules/ffprobe-static/bin/**/*"
     ]
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.16",
     "axios": "^1.6.0",
     "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
     "electron-is-dev": "^3.0.1",
+    "electron-oauth2": "^3.0.0",
     "express": "^4.21.0",
     "ffmpeg-static": "^5.3.0",
     "ffprobe-static": "^3.1.0",
     "fluent-ffmpeg": "^2.1.2",
+    "googleapis": "^173.0.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-router-dom": "^6.20.0"
@@ -87,6 +90,7 @@
     "cross-env": "^10.1.0",
     "electron": "^41.2.0",
     "electron-builder": "^26.8.1",
+    "esbuild": "^0.28.1",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",

@@ -27,3 +27,6 @@ release
 
 cloudflared.exe
 .env
+server/credentials.json
+
+public_videos/*.mp4

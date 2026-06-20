@@ -1,14 +1,13 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 
-// ─── ENV CONFIG ─────────────────────────────────────────────────────────────
-const MY_DOMAIN = import.meta.env?.VITE_REACT_URL || '';
-const GAPI_KEY = import.meta.env?.VITE_GOOGLE_API_KEY || '';
-const CLIENT_ID = import.meta.env?.VITE_GOOGLE_CLIENT_ID || '';
-const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
-
 // Cấu hình cứng URL và Tab mặc định thông qua file .env giống Dashboard
 const ENV_SHEET_URL = import.meta.env?.VITE_GOOGLE_SHEET_URL || '';
 const ENV_SHEET_TAB = import.meta.env?.VITE_GOOGLE_SHEET_TAB || 'Trang tính1';
+
+// Định nghĩa Endpoint Node local để chuyển tiếp gói mạng an toàn
+const LOCAL_BACKEND_URL = 'http://localhost:3001';
+// Giữ nguyên domain tĩnh để sinh chuỗi link khớp chính xác với cấu trúc cột C trên Sheet
+const FIXED_VIDEO_DOMAIN = 'https://video.cmicstudio.shop';
 
 function parseSheetId(input) {
     const m = input.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
@@ -20,26 +19,6 @@ function formatSize(bytes) {
     return (bytes / 1024 ** 3).toFixed(2) + ' GB';
 }
 
-function loadGapi() {
-    return new Promise((res, rej) => {
-        if (window.gapi) { window.gapi.load('client', res); return; }
-        const s = document.createElement('script');
-        s.src = 'https://apis.google.com/js/api.js';
-        s.onload = () => window.gapi.load('client', res);
-        s.onerror = rej;
-        document.head.appendChild(s);
-    });
-}
-function loadGis() {
-    return new Promise((res, rej) => {
-        if (window.google?.accounts) { res(); return; }
-        const s = document.createElement('script');
-        s.src = 'https://accounts.google.com/gsi/client';
-        s.onload = res; s.onerror = rej;
-        document.head.appendChild(s);
-    });
-}
-
 // ─── SUB-COMPONENT: TEXTAREA TỰ CO GIÃN ĐỘ CAO THEO CHỮ ───────────────────
 function AutoExpandingInput({ value, onChange, label }) {
     const textareaRef = useRef(null);
@@ -47,8 +26,8 @@ function AutoExpandingInput({ value, onChange, label }) {
     const adjustHeight = () => {
         const textarea = textareaRef.current;
         if (textarea) {
-            textarea.style.height = 'auto'; 
-            textarea.style.height = `${textarea.scrollHeight}px`; 
+            textarea.style.height = 'auto';
+            textarea.style.height = `${textarea.scrollHeight}px`;
         }
     };
 
@@ -87,7 +66,6 @@ export default function VideoUrlPicker() {
     const [selectedRow, setSelectedRow] = useState(null);
     const [sheetLoading, setSheetLoading] = useState(false);
     const [sheetError, setSheetError] = useState('');
-    const [authed, setAuthed] = useState(false);
     const [sheetId, setSheetId] = useState('');
 
     // ── Dynamic Form State
@@ -121,8 +99,8 @@ export default function VideoUrlPicker() {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [videoUrl]);
 
-    // ─── FETCH ROWS ──────────────────────────────────────────────────────────
-    const fetchRows = useCallback(async (token, sid) => {
+    // ─── ĐÃ SỬA: FETCH ROWS QUA SERVICE ACCOUNT BACKEND (KHÔNG TRUYỀN TOKEN) ───
+    const fetchRows = useCallback(async (sid) => {
         const id = sid || sheetId;
         if (!id) return;
         setSheetLoading(true);
@@ -134,10 +112,16 @@ export default function VideoUrlPicker() {
 
         try {
             const range = `${sheetTab}!A:Z`;
-            const url = `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${encodeURIComponent(range)}`;
-            const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+
+            // Gọi qua Node Server để Backend tự lấy quyền từ credentials.json đọc data
+            const res = await fetch(`${LOCAL_BACKEND_URL}/api/sheets/read`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sheetId: id, range }) // 👈 Bỏ token hoàn toàn
+            });
+
             const data = await res.json();
-            if (!res.ok) throw new Error(data?.error?.message || 'Không đọc được dải ô dữ liệu hệ thống.');
+            if (!res.ok) throw new Error(data?.error || 'Không đọc được dải ô dữ liệu hệ thống.');
 
             const values = data.values || [];
             if (!values.length) throw new Error('Sheet trống.');
@@ -161,7 +145,7 @@ export default function VideoUrlPicker() {
         }
     }, [sheetTab, sheetId]);
 
-    // ─── AUTH + CONNECT ──────────────────────────────────────────────────────
+    // ─── ĐÃ SỬA: NÚT KẾT NỐI KHÔNG BẬT POPUP OAUTH, CHẠY THẲNG XUỐNG BE ───
     const handleConnect = async () => {
         setSheetError('');
         setSheetLoading(true);
@@ -169,40 +153,18 @@ export default function VideoUrlPicker() {
         if (!sid) { setSheetError('Nhập URL hoặc ID của Google Sheet.'); setSheetLoading(false); return; }
         setSheetId(sid);
 
-        try {
-            await Promise.all([loadGapi(), loadGis()]);
-            await window.gapi.client.init({
-                apiKey: GAPI_KEY,
-                discoveryDocs: ['https://sheets.googleapis.com/$discovery/rest?version=v4'],
-            });
-
-            if (authed && window._gToken) {
-                await fetchRows(window._gToken, sid);
-                return;
-            }
-
-            const tc = window.google.accounts.oauth2.initTokenClient({
-                client_id: CLIENT_ID,
-                scope: SCOPES,
-                callback: async (resp) => {
-                    if (resp.error) { setSheetError('Xác thực thất bại: ' + resp.error); setSheetLoading(false); return; }
-                    window._gToken = resp.access_token;
-                    setAuthed(true);
-                    await fetchRows(resp.access_token, sid);
-                },
-            });
-            tc.requestAccessToken();
-        } catch (e) {
-            setSheetError('Lỗi Google API: ' + (e.message || e));
-            setSheetLoading(false);
-        }
+        await fetchRows(sid);
     };
 
-    // 🔥 TRIGGER TỰ ĐỘNG KẾT NỐI KHI VÀO TRANG (Đọc cấu hình sẵn từ file .env)
+    // Tự động kết nối và tải bảng ma trận ngay khi vừa mở trang quản trị dữ liệu
     useEffect(() => {
-        if (sheetInput.trim() && !sheetLoading && !authed) {
+        if (sheetInput.trim() && !sheetLoading) {
             const timer = setTimeout(() => {
-                handleConnect();
+                const sid = parseSheetId(sheetInput);
+                if (sid) {
+                    setSheetId(sid);
+                    fetchRows(sid);
+                }
             }, 400);
             return () => clearTimeout(timer);
         }
@@ -222,8 +184,9 @@ export default function VideoUrlPicker() {
         setVideoFile(null);
 
         const videoUrlFromRow = row.cells[2]?.trim() || '';
-        if (videoUrlFromRow && (videoUrlFromRow.startsWith('http') || videoUrlFromRow.includes('/videos/'))) {
-            setVideoUrl(videoUrlFromRow);
+        if (videoUrlFromRow) {
+            const pureFileName = videoUrlFromRow.replace(/^.*[\\/]/, '');
+            setVideoUrl(`${LOCAL_BACKEND_URL}/videos/${pureFileName}`);
         } else {
             setVideoUrl('');
         }
@@ -246,19 +209,19 @@ export default function VideoUrlPicker() {
 
         setVideoFile(file);
         setVideoUrl(URL.createObjectURL(file));
-        handleInputChange(2, `${MY_DOMAIN}/videos/${file.name}`);
+        handleInputChange(2, `${FIXED_VIDEO_DOMAIN}/videos/${file.name}`);
     };
     const handleDrop = (e) => { e.preventDefault(); setDragging(false); handleFileSelect(e.dataTransfer.files[0]); };
 
-    // ─── WRITE BACK TO SHEET ──────────────────────────────────────────────────
+    // ─── ĐÃ SỬA: ĐỒNG BỘ CẬP NHẬT TRƯỜNG DỮ LIỆU QUA BE (BỎ TOKEN) ────────────────
     const handleUpdate = async () => {
-        if (!selectedRow || !window._gToken) return;
+        if (!selectedRow) return;
         setSaving(true);
         setSaveMsg('');
         setSaveErr('');
 
         try {
-            const data = Object.keys(formData).map(index => {
+            const updates = Object.keys(formData).map(index => {
                 const letter = String.fromCharCode(65 + parseInt(index));
                 return {
                     range: `${sheetTab}!${letter}${selectedRow}`,
@@ -266,19 +229,21 @@ export default function VideoUrlPicker() {
                 };
             });
 
-            const res = await fetch(
-                `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchUpdate`,
-                {
+            // Lặp qua mảng cập nhật gửi thẳng xuống API Direct Client của Backend
+            for (const item of updates) {
+                const res = await fetch(`${LOCAL_BACKEND_URL}/api/sheets/update`, {
                     method: 'POST',
-                    headers: {
-                        Authorization: `Bearer ${window._gToken}`,
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }),
-                }
-            );
-            const result = await res.json();
-            if (!res.ok) throw new Error(result?.error?.message || 'Ghi thất bại.');
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sheetId,
+                        range: item.range,
+                        values: item.values
+                    }) // 👈 Không truyền token
+                });
+
+                const resData = await res.json();
+                if (!res.ok) throw new Error(resData?.error || `Ghi dữ liệu hụt tại vị trí ô ${item.range}`);
+            }
 
             setRows(prev => prev.map(r => {
                 if (r._row === selectedRow) {
@@ -288,7 +253,7 @@ export default function VideoUrlPicker() {
                 return r;
             }));
 
-            setSaveMsg(`✅ Đã cập nhật hàng #${selectedRow} lên Sheet`);
+            setSaveMsg(`✅ Đã cập nhật hàng #${selectedRow} lên Sheet thành công!`);
 
             if (iframeRef.current) {
                 const src = iframeRef.current.src;
@@ -296,8 +261,9 @@ export default function VideoUrlPicker() {
                 setTimeout(() => { iframeRef.current.src = src; }, 300);
             }
         } catch (e) {
-            setSaveErr('❌ ' + e.message);
+            setSaveErr('❌ Lỗi lưu Sheet: ' + e.message);
         } finally {
+            setDestination(false);
             setSaving(false);
         }
     };
@@ -342,7 +308,7 @@ export default function VideoUrlPicker() {
                                 type="button" onClick={handleConnect} disabled={!sheetInput.trim() || sheetLoading}
                                 className="shrink-0 px-5 py-2 rounded-xl font-bold text-xs bg-gradient-to-r from-purple-700 to-purple-500 hover:brightness-110 disabled:bg-slate-800 flex items-center gap-2 cursor-pointer"
                             >
-                                {sheetLoading ? 'Đang xử lý...' : authed ? '🔄 Tải lại' : '🔗 Kết nối'}
+                                {sheetLoading ? 'Đang xử lý...' : '🔗 Tải Sheet'}
                             </button>
                         </div>
                         {sheetError && <div className="p-2.5 bg-red-500/10 border border-red-500/20 rounded-xl text-[11px] text-red-400">⚠️ {sheetError}</div>}
@@ -424,7 +390,7 @@ export default function VideoUrlPicker() {
                                     onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)}
                                     onDrop={handleDrop} onClick={() => document.getElementById('file-input').click()}
                                     className={`border border-dashed rounded-xl p-5 flex flex-col items-center justify-center gap-2 text-center cursor-pointer transition-all min-h-[110px]
-                    ${dragging ? 'border-purple-500 bg-purple-500/10' : 'border-slate-800 hover:border-slate-700 bg-slate-950/40'}`}
+                                    ${dragging ? 'border-purple-500 bg-purple-500/10' : 'border-slate-800 hover:border-slate-700 bg-slate-950/40'}`}
                                 >
                                     <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center text-lg text-slate-400">📹</div>
                                     <p className="font-medium text-xs text-slate-300">Thả hoặc chọn video (Auto điền cột C)</p>
@@ -470,8 +436,8 @@ export default function VideoUrlPicker() {
 
                         <button
                             type="button" onClick={handleUpdate} disabled={!isFormFilled || saving}
-                            className={`w-full py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer
-                ${isFormFilled && !saving ? 'bg-gradient-to-r from-purple-600 via-pink-600 to-red-500 hover:brightness-110 active:scale-[0.99]' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}
+                            className={`w-full py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 relative overflow-hidden cursor-pointer
+                            ${isFormFilled && !saving ? 'bg-gradient-to-r from-purple-600 via-pink-600 to-red-500 hover:brightness-110 active:scale-[0.99]' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}
                         >
                             {saving ? '⏳ Đang ghi dữ liệu...' : '💾 Cập nhật lên Google Sheet'}
                         </button>
