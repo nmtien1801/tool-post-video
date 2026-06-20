@@ -31,6 +31,16 @@ app.use(express.json());
 // ─── ĐÃ SỬA CHUẨN ĐƯỜNG DẪN: Đọc đúng file credentials.json khi build ───
 const CREDENTIALS_PATH = path.join(__dirname, "credentials.json");
 
+function getServiceAccountEmail() {
+  try {
+    if (!fs.existsSync(CREDENTIALS_PATH)) return "";
+    const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, "utf8"));
+    return credentials.client_email || "";
+  } catch {
+    return "";
+  }
+}
+
 function getGoogleAuthClient() {
   if (!fs.existsSync(CREDENTIALS_PATH)) {
     return null; // Không throw Error làm sập nguồn Node nữa
@@ -39,6 +49,24 @@ function getGoogleAuthClient() {
     keyFile: CREDENTIALS_PATH,
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   });
+}
+
+function getGoogleSheetError(error) {
+  const serviceEmail = getServiceAccountEmail();
+  const status = error?.code || error?.response?.status;
+  const message = error?.message || "Unknown Google Sheets error";
+
+  if (status === 403 || /permission/i.test(message)) {
+    return {
+      status: 403,
+      message:
+        `Service account không có quyền sửa Sheet. ` +
+        `Hãy share Google Sheet với quyền Editor cho email: ${serviceEmail || "(không đọc được client_email)"}. ` +
+        `Google trả về: ${message}`,
+    };
+  }
+
+  return { status: 500, message };
 }
 
 // Thêm Endpoint gốc phục vụ luồng check sức khỏe của file main.js
@@ -74,10 +102,11 @@ app.post("/api/sheets/read", async (req, res) => {
     res.json(response.data);
   } catch (error) {
     console.error("Read Sheet Error:", error);
+    const sheetError = getGoogleSheetError(error);
     res
-      .status(500)
+      .status(sheetError.status)
       .json({
-        error: "Backend kết nối Google Sheet thất bại: " + error.message,
+        error: "Backend kết nối Google Sheet thất bại: " + sheetError.message,
       });
   }
 });
@@ -112,9 +141,48 @@ app.post("/api/sheets/update", async (req, res) => {
     res.json(response.data);
   } catch (error) {
     console.error("Update Sheet Error:", error);
+    const sheetError = getGoogleSheetError(error);
     res
-      .status(500)
-      .json({ error: "Backend ghi dữ liệu Sheet thất bại: " + error.message });
+      .status(sheetError.status)
+      .json({ error: "Backend ghi dữ liệu Sheet thất bại: " + sheetError.message });
+  }
+});
+
+// API Cập Nhật Nhiều Ô Sheet Trong Một Lần Gọi
+app.post("/api/sheets/batch-update", async (req, res) => {
+  const { sheetId, data } = req.body;
+  if (!sheetId || !Array.isArray(data) || data.length === 0) {
+    return res
+      .status(400)
+      .json({ error: "Thiếu tham số dữ liệu batch update Sheet." });
+  }
+
+  try {
+    const auth = getGoogleAuthClient();
+    if (!auth) {
+      return res
+        .status(500)
+        .json({
+          error: `Không tìm thấy file credentials.json cấu hình tại: ${CREDENTIALS_PATH}`,
+        });
+    }
+
+    const sheets = google.sheets({ version: "v4", auth });
+    const response = await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId: sheetId,
+      requestBody: {
+        valueInputOption: "USER_ENTERED",
+        data,
+      },
+    });
+
+    res.json(response.data);
+  } catch (error) {
+    console.error("Batch Update Sheet Error:", error);
+    const sheetError = getGoogleSheetError(error);
+    res
+      .status(sheetError.status)
+      .json({ error: "Backend ghi dữ liệu Sheet thất bại: " + sheetError.message });
   }
 });
 

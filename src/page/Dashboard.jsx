@@ -15,7 +15,7 @@ const PRIVACY_OPTIONS_YOUTUBE = [
 
 const ENV_SHEET_URL = import.meta.env?.VITE_GOOGLE_SHEET_URL || '';
 const ENV_SHEET_TAB = import.meta.env?.VITE_GOOGLE_SHEET_TAB || 'Trang tính1';
-const LOCAL_BACKEND_URL = 'http://localhost:3001';
+const LOCAL_BACKEND_URL = import.meta.env?.VITE_BACKEND_TOOL_URL;
 
 function parseSheetId(input) {
   const m = input.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
@@ -72,12 +72,12 @@ export default function MultiPostDashboard() {
     setSelectedRow(null);
 
     try {
-      const range = `${sheetTab}!A:J`; 
+      const range = `${sheetTab}!A:J`;
 
       // Gọi qua API Bridge lách triệt để Provisional headers của Chrome
       const result = await window.electronAPI.sendToBackend('/api/sheets/read', { sheetId: id, range });
       if (!result.success) throw new Error(result.error || 'Lỗi kết nối tới ma trận luồng dữ liệu Google Sheet.');
-      
+
       const data = result.data;
       const values = data.values || [];
       if (!values.length) throw new Error('Sheet trống.');
@@ -148,7 +148,7 @@ export default function MultiPostDashboard() {
     setError(null);
     setResult(null);
 
-    const videoUrlFromRow = row.cells[2]?.trim() || ''; 
+    const videoUrlFromRow = row.cells[2]?.trim() || '';
     if (videoUrlFromRow) {
       const pureFileName = videoUrlFromRow.replace(/^.*[\\/]/, '');
       setVideoUrl(`${LOCAL_BACKEND_URL}/videos/${pureFileName}`);
@@ -156,12 +156,12 @@ export default function MultiPostDashboard() {
       setVideoUrl('');
     }
 
-    setTitle(row.cells[3] || ''); 
-    setCaption(row.cells[4] || ''); 
+    setTitle(row.cells[3] || '');
+    setCaption(row.cells[4] || '');
 
     setSelectedPlatforms({
-      tiktok: row.cells[5]?.trim().toUpperCase() === 'TRUE', 
-      youtube: row.cells[6]?.trim().toUpperCase() === 'TRUE' 
+      tiktok: row.cells[5]?.trim().toUpperCase() === 'TRUE',
+      youtube: row.cells[6]?.trim().toUpperCase() === 'TRUE'
     });
   };
 
@@ -244,12 +244,12 @@ export default function MultiPostDashboard() {
         const row = pendingRows[i];
         setUploadStatus(`Đang xử lý hàng #${row._row}...`);
 
-        const currentVideoUrl = row.cells[2]?.trim() || ''; 
+        const currentVideoUrl = row.cells[2]?.trim() || '';
         const currentTitle = row.cells[3]?.trim() || 'Video Title';
-        const currentCaption = row.cells[4]?.trim() || ''; 
+        const currentCaption = row.cells[4]?.trim() || '';
         const currentPlatforms = {
-          tiktok: row.cells[5]?.trim().toUpperCase() === 'TRUE', 
-          youtube: row.cells[6]?.trim().toUpperCase() === 'TRUE' 
+          tiktok: row.cells[5]?.trim().toUpperCase() === 'TRUE',
+          youtube: row.cells[6]?.trim().toUpperCase() === 'TRUE'
         };
 
         if (!currentVideoUrl) continue;

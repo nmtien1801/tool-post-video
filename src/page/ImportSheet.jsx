@@ -3,9 +3,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 // Cấu hình cứng URL và Tab mặc định thông qua file .env giống Dashboard
 const ENV_SHEET_URL = import.meta.env?.VITE_GOOGLE_SHEET_URL || '';
 const ENV_SHEET_TAB = import.meta.env?.VITE_GOOGLE_SHEET_TAB || 'Trang tính1';
-
-// Định nghĩa Endpoint Node local để chuyển tiếp gói mạng an toàn
-const LOCAL_BACKEND_URL = 'http://localhost:3001';
+const LOCAL_BACKEND_URL = import.meta.env?.VITE_BACKEND_TOOL_URL;
 // Giữ nguyên domain tĩnh để sinh chuỗi link khớp chính xác với cấu trúc cột C trên Sheet
 const FIXED_VIDEO_DOMAIN = 'https://video.cmicstudio.shop';
 
@@ -13,6 +11,43 @@ function parseSheetId(input) {
     const m = input.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
     return m ? m[1] : input.trim();
 }
+
+function getColumnLetter(index) {
+    let letter = '';
+    let column = index + 1;
+    while (column > 0) {
+        const remainder = (column - 1) % 26;
+        letter = String.fromCharCode(65 + remainder) + letter;
+        column = Math.floor((column - 1) / 26);
+    }
+    return letter;
+}
+
+async function callBackend(endpoint, body) {
+    if (window.electronAPI?.sendToBackend) {
+        const result = await window.electronAPI.sendToBackend(endpoint, body);
+        if (!result.success) {
+            let message = result.error || 'Backend xử lý thất bại.';
+            try {
+                message = JSON.parse(message)?.error || message;
+            } catch {
+                message = result.error || message;
+            }
+            throw new Error(message);
+        }
+        return result.data;
+    }
+
+    const res = await fetch(`${LOCAL_BACKEND_URL}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || 'Backend xử lý thất bại.');
+    return data;
+}
+
 function formatSize(bytes) {
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
     if (bytes < 1024 ** 3) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
@@ -114,14 +149,7 @@ export default function VideoUrlPicker() {
             const range = `${sheetTab}!A:Z`;
 
             // Gọi qua Node Server để Backend tự lấy quyền từ credentials.json đọc data
-            const res = await fetch(`${LOCAL_BACKEND_URL}/api/sheets/read`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sheetId: id, range }) // 👈 Bỏ token hoàn toàn
-            });
-
-            const data = await res.json();
-            if (!res.ok) throw new Error(data?.error || 'Không đọc được dải ô dữ liệu hệ thống.');
+            const data = await callBackend('/api/sheets/read', { sheetId: id, range });
 
             const values = data.values || [];
             if (!values.length) throw new Error('Sheet trống.');
@@ -215,39 +243,28 @@ export default function VideoUrlPicker() {
 
     // ─── ĐÃ SỬA: ĐỒNG BỘ CẬP NHẬT TRƯỜNG DỮ LIỆU QUA BE (BỎ TOKEN) ────────────────
     const handleUpdate = async () => {
-        if (!selectedRow) return;
+        if (!selectedRow || !sheetId) return;
         setSaving(true);
         setSaveMsg('');
         setSaveErr('');
 
         try {
-            const updates = Object.keys(formData).map(index => {
-                const letter = String.fromCharCode(65 + parseInt(index));
-                return {
-                    range: `${sheetTab}!${letter}${selectedRow}`,
-                    values: [[formData[index]]],
-                };
+            const lastColumn = getColumnLetter(Math.max(dynamicHeaders.length - 1, 0));
+            const values = [
+                dynamicHeaders.map((_, index) => formData[index] ?? '')
+            ];
+
+            await callBackend('/api/sheets/batch-update', {
+                sheetId,
+                data: [{
+                    range: `${sheetTab}!A${selectedRow}:${lastColumn}${selectedRow}`,
+                    values,
+                }]
             });
-
-            // Lặp qua mảng cập nhật gửi thẳng xuống API Direct Client của Backend
-            for (const item of updates) {
-                const res = await fetch(`${LOCAL_BACKEND_URL}/api/sheets/update`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        sheetId,
-                        range: item.range,
-                        values: item.values
-                    }) // 👈 Không truyền token
-                });
-
-                const resData = await res.json();
-                if (!res.ok) throw new Error(resData?.error || `Ghi dữ liệu hụt tại vị trí ô ${item.range}`);
-            }
 
             setRows(prev => prev.map(r => {
                 if (r._row === selectedRow) {
-                    const updatedCells = dynamicHeaders.map((_, idx) => formData[idx] || '');
+                    const updatedCells = dynamicHeaders.map((_, idx) => formData[idx] ?? '');
                     return { ...r, cells: updatedCells };
                 }
                 return r;
@@ -263,7 +280,6 @@ export default function VideoUrlPicker() {
         } catch (e) {
             setSaveErr('❌ Lỗi lưu Sheet: ' + e.message);
         } finally {
-            setDestination(false);
             setSaving(false);
         }
     };
