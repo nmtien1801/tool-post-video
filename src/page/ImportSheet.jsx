@@ -4,7 +4,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 const ENV_SHEET_URL = import.meta.env?.VITE_GOOGLE_SHEET_URL || '';
 const ENV_SHEET_TAB = import.meta.env?.VITE_GOOGLE_SHEET_TAB || 'Trang tính1';
 const LOCAL_BACKEND_URL = import.meta.env?.VITE_BACKEND_TOOL_URL;
-// Giữ nguyên domain tĩnh để sinh chuỗi link khớp chính xác với cấu trúc cột C trên Sheet
+// Giữ nguyên domain tĩnh để sinh chuỗi link khớp chính xác với cấu trúc cột A trên Sheet mới
 const FIXED_VIDEO_DOMAIN = 'https://video.cmicstudio.shop';
 
 function parseSheetId(input) {
@@ -134,7 +134,7 @@ export default function VideoUrlPicker() {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [videoUrl]);
 
-    // ─── ĐÃ SỬA: FETCH ROWS QUA SERVICE ACCOUNT BACKEND (KHÔNG TRUYỀN TOKEN) ───
+    // ─── FETCH ROWS QUA SERVICE ACCOUNT BACKEND (KHÔNG TRUYỀN TOKEN) ───
     const fetchRows = useCallback(async (sid) => {
         const id = sid || sheetId;
         if (!id) return;
@@ -146,7 +146,7 @@ export default function VideoUrlPicker() {
         setFormData({});
 
         try {
-            const range = `${sheetTab}!A:Z`;
+            const range = `${sheetTab}!A:H`; // Thay đổi giới hạn cột từ A đến H vì đã xóa bớt 2 cột
 
             // Gọi qua Node Server để Backend tự lấy quyền từ credentials.json đọc data
             const data = await callBackend('/api/sheets/read', { sheetId: id, range });
@@ -173,7 +173,7 @@ export default function VideoUrlPicker() {
         }
     }, [sheetTab, sheetId]);
 
-    // ─── ĐÃ SỬA: NÚT KẾT NỐI KHÔNG BẬT POPUP OAUTH, CHẠY THẲNG XUỐNG BE ───
+    // ─── NÚT KẾT NỐI KHÔNG BẬT POPUP OAUTH, CHẠY THẲNG XUỐNG BE ───
     const handleConnect = async () => {
         setSheetError('');
         setSheetLoading(true);
@@ -198,7 +198,7 @@ export default function VideoUrlPicker() {
         }
     }, []);
 
-    // ─── SELECT ROW ──────────────────────────────────────────────────────────
+    // ─── SELECT ROW (ĐÃ LÙI INDEX 2 VỀ 0) ──────────────────────────────────────────────────────────
     const handleSelectRow = (row) => {
         setSelectedRow(row._row);
 
@@ -211,10 +211,12 @@ export default function VideoUrlPicker() {
         if (videoUrl) URL.revokeObjectURL(videoUrl);
         setVideoFile(null);
 
-        const videoUrlFromRow = row.cells[2]?.trim() || '';
+        // ĐÃ SỬA: Cột A mới (Link url) tương ứng index 0 thay vì index 2 cũ
+        const videoUrlFromRow = row.cells[0]?.trim() || '';
         if (videoUrlFromRow) {
             const pureFileName = videoUrlFromRow.replace(/^.*[\\/]/, '');
-            setVideoUrl(`${LOCAL_BACKEND_URL}/videos/${pureFileName}`);
+            // Thêm query string dynamic ?row= để ép React tải lại trình phát khi đổi dòng, tránh cache trùng file
+            setVideoUrl(`${LOCAL_BACKEND_URL}/videos/${pureFileName}?row=${row._row}`);
         } else {
             setVideoUrl('');
         }
@@ -237,11 +239,13 @@ export default function VideoUrlPicker() {
 
         setVideoFile(file);
         setVideoUrl(URL.createObjectURL(file));
-        handleInputChange(2, `${FIXED_VIDEO_DOMAIN}/videos/${file.name}`);
+        // ĐÃ SỬA: Khi drop video vào, nó sẽ cập nhật tự động cho index 0 (Cột A - Link url mới)
+        handleInputChange(0, `${FIXED_VIDEO_DOMAIN}/videos/${file.name}`);
     };
+
     const handleDrop = (e) => { e.preventDefault(); setDragging(false); handleFileSelect(e.dataTransfer.files[0]); };
 
-    // ─── ĐÃ SỬA: ĐỒNG BỘ CẬP NHẬT TRƯỜNG DỮ LIỆU QUA BE (BỎ TOKEN) ────────────────
+    // ─── ĐỒNG BỘ CẬP NHẬT TRƯỜNG DỮ LIỆU QUA BE (BỎ TOKEN) ────────────────
     const handleUpdate = async () => {
         if (!selectedRow || !sheetId) return;
         setSaving(true);
@@ -409,7 +413,7 @@ export default function VideoUrlPicker() {
                                     ${dragging ? 'border-purple-500 bg-purple-500/10' : 'border-slate-800 hover:border-slate-700 bg-slate-950/40'}`}
                                 >
                                     <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center text-lg text-slate-400">📹</div>
-                                    <p className="font-medium text-xs text-slate-300">Thả hoặc chọn video (Auto điền cột C)</p>
+                                    <p className="font-medium text-xs text-slate-300">Thả hoặc chọn video (Auto điền cột A)</p>
                                 </div>
                             ) : (
                                 <div className="space-y-2">

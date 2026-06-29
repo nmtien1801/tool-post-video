@@ -61,7 +61,7 @@ export default function MultiPostDashboard() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
 
-  // ─── ĐÃ SỬA: ĐỌC DỮ LIỆU QUA IPC BRIDGE (window.electronAPI) ───
+  // ─── ĐỌC DỮ LIỆU QUA IPC BRIDGE ───
   const fetchRows = useCallback(async (sid) => {
     const id = sid || sheetId;
     if (!id) return;
@@ -72,9 +72,8 @@ export default function MultiPostDashboard() {
     setSelectedRow(null);
 
     try {
-      const range = `${sheetTab}!A:J`;
+      const range = `${sheetTab}!A:H`; // Giới hạn quét từ A đến H vì đã xóa bớt 2 cột
 
-      // Gọi qua API Bridge lách triệt để Provisional headers của Chrome
       const result = await window.electronAPI.sendToBackend('/api/sheets/read', { sheetId: id, range });
       if (!result.success) throw new Error(result.error || 'Lỗi kết nối tới ma trận luồng dữ liệu Google Sheet.');
 
@@ -86,10 +85,10 @@ export default function MultiPostDashboard() {
       setDynamicHeaders(headerRow);
 
       const mapped = values.slice(1).map((row, i) => {
-        const cells = Array.from({ length: 10 }, (_, colIdx) => row[colIdx] || '');
+        const cells = Array.from({ length: 8 }, (_, colIdx) => row[colIdx] || '');
         return { _row: i + 2, cells: cells };
       }).filter(r => {
-        const urlCell = r.cells[2]?.trim();
+        const urlCell = r.cells[0]?.trim(); // Cột A mới (Link url) là index 0
         return urlCell !== '' && urlCell !== '—' && urlCell !== undefined;
       });
 
@@ -123,45 +122,47 @@ export default function MultiPostDashboard() {
     }
   }, []);
 
-  // ─── ĐÃ SỬA: GHI TRẠNG THÁI LÊN SHEET QUA IPC BRIDGE ───
+  // ─── ĐÃ SỬA: ĐỊNH VỊ LẠI CỘT SAU KHI LÙI 2 VỊ TRÍ ───
   const updateSheetAfterPublish = async (rowNumber, tiktokUrl, youtubeUrl) => {
     try {
-      // 1. Cập nhật Trạng thái tại cột J -> TRUE
-      await window.electronAPI.sendToBackend('/api/sheets/update', { sheetId, range: `${sheetTab}!J${rowNumber}`, values: [['TRUE']] });
+      // 1. Cập nhật Trạng thái tại cột H (index 7) -> TRUE
+      await window.electronAPI.sendToBackend('/api/sheets/update', { sheetId, range: `${sheetTab}!H${rowNumber}`, values: [['TRUE']] });
 
-      // 2. Cập nhật Link YouTube vào Cột H
+      // 2. Cập nhật Link YouTube vào Cột F (index 5)
       if (youtubeUrl) {
-        await window.electronAPI.sendToBackend('/api/sheets/update', { sheetId, range: `${sheetTab}!H${rowNumber}`, values: [[youtubeUrl]] });
+        await window.electronAPI.sendToBackend('/api/sheets/update', { sheetId, range: `${sheetTab}!F${rowNumber}`, values: [[youtubeUrl]] });
       }
 
-      // 3. Cập nhật Link TikTok vào Cột I
+      // 3. Cập nhật Link TikTok vào Cột G (index 6)
       if (tiktokUrl) {
-        await window.electronAPI.sendToBackend('/api/sheets/update', { sheetId, range: `${sheetTab}!I${rowNumber}`, values: [[tiktokUrl]] });
+        await window.electronAPI.sendToBackend('/api/sheets/update', { sheetId, range: `${sheetTab}!G${rowNumber}`, values: [[tiktokUrl]] });
       }
     } catch (e) {
       console.error("Lỗi cập nhật dữ liệu ô Matrix Sheet:", e);
     }
   };
 
+  // ─── ĐÃ SỬA: CẬP NHẬT INDEX VÀ TRANH CHẤP CACHE TRÙNG VIDEO ───
   const handleSelectRow = (row) => {
     setSelectedRow(row._row);
     setError(null);
     setResult(null);
 
-    const videoUrlFromRow = row.cells[2]?.trim() || '';
+    const videoUrlFromRow = row.cells[0]?.trim() || ''; // Cột A là index 0
     if (videoUrlFromRow) {
       const pureFileName = videoUrlFromRow.replace(/^.*[\\/]/, '');
-      setVideoUrl(`${LOCAL_BACKEND_URL}/videos/${pureFileName}`);
+      // Bổ sung dynamic query ?row= để ép React tải lại video khi bạn bấm chuyển giữa các dòng
+      setVideoUrl(`${LOCAL_BACKEND_URL}/videos/${pureFileName}?row=${row._row}`);
     } else {
       setVideoUrl('');
     }
 
-    setTitle(row.cells[3] || '');
-    setCaption(row.cells[4] || '');
+    setTitle(row.cells[1] || ''); // Cột B (Title) là index 1
+    setCaption(row.cells[2] || ''); // Cột C (Caption) là index 2
 
     setSelectedPlatforms({
-      tiktok: row.cells[5]?.trim().toUpperCase() === 'TRUE',
-      youtube: row.cells[6]?.trim().toUpperCase() === 'TRUE'
+      tiktok: row.cells[3]?.trim().toUpperCase() === 'TRUE', // Cột D (Tiktok) là index 3
+      youtube: row.cells[4]?.trim().toUpperCase() === 'TRUE' // Cột E (Ytb) là index 4
     });
   };
 
@@ -232,29 +233,33 @@ export default function MultiPostDashboard() {
     return postData;
   };
 
+  // ─── ĐÃ SỬA: ĐƯA TRY...CATCH VÀO TRONG VÒNG LẶP ĐỂ KHÔNG SẬP CẢ TOOL ───
   const handlePublishAndScan = async () => {
     if (uploading || rows.length === 0) return;
-    const pendingRows = rows.filter(r => r.cells[9]?.trim().toUpperCase() === 'FALSE' || r.cells[9]?.trim() === '');
+
+    // Cột Trạng thái mới nằm ở cột H tức index 7
+    const pendingRows = rows.filter(r => r.cells[7]?.trim().toUpperCase() === 'FALSE' || r.cells[7]?.trim() === '');
     if (pendingRows.length === 0) { alert("Không tìm thấy hàng nào ở trạng thái FALSE!"); return; }
 
     setUploading(true); setError(null); setResult(null);
 
-    try {
-      for (let i = 0; i < pendingRows.length; i++) {
-        const row = pendingRows[i];
-        setUploadStatus(`Đang xử lý hàng #${row._row}...`);
+    for (let i = 0; i < pendingRows.length; i++) {
+      const row = pendingRows[i];
+      setUploadStatus(`Đang xử lý hàng #${row._row}...`);
 
-        const currentVideoUrl = row.cells[2]?.trim() || '';
-        const currentTitle = row.cells[3]?.trim() || 'Video Title';
-        const currentCaption = row.cells[4]?.trim() || '';
-        const currentPlatforms = {
-          tiktok: row.cells[5]?.trim().toUpperCase() === 'TRUE',
-          youtube: row.cells[6]?.trim().toUpperCase() === 'TRUE'
-        };
+      const currentVideoUrl = row.cells[0]?.trim() || ''; // index 0
+      const currentTitle = row.cells[1]?.trim() || 'Video Title'; // index 1
+      const currentCaption = row.cells[2]?.trim() || ''; // index 2
+      const currentPlatforms = {
+        tiktok: row.cells[3]?.trim().toUpperCase() === 'TRUE', // index 3
+        youtube: row.cells[4]?.trim().toUpperCase() === 'TRUE' // index 4
+      };
 
-        if (!currentVideoUrl) continue;
-        if (!currentPlatforms.tiktok && !currentPlatforms.youtube) continue;
+      if (!currentVideoUrl) continue;
+      if (!currentPlatforms.tiktok && !currentPlatforms.youtube) continue;
 
+      // Cô lập lỗi từng dòng để không ảnh hưởng đến hàng kế tiếp
+      try {
         const postData = await executeUploadRow(currentVideoUrl, currentTitle, currentCaption, currentPlatforms);
         setResult(postData);
 
@@ -267,14 +272,15 @@ export default function MultiPostDashboard() {
         const ytFinalUrl = ytId ? `https://studio.youtube.com/video/${ytId}/edit` : '';
 
         await updateSheetAfterPublish(row._row, tkFinalUrl, ytFinalUrl);
+      } catch (rowError) {
+        console.error(`Lỗi xảy ra tại hàng #${row._row}:`, rowError);
+        setError(`Hàng #${row._row} thất bại: ${rowError.message}`);
       }
-      setUploadStatus('Đang tải lại danh sách...');
-      await fetchRows(sheetId);
-    } catch (err) {
-      setError(err.message || 'Đã xảy ra lỗi không xác định');
-    } finally {
-      setUploading(false); setUploadStatus('');
     }
+
+    setUploadStatus('Đang tải lại danh sách...');
+    await fetchRows(sheetId);
+    setUploading(false); setUploadStatus('');
   };
 
   return (
