@@ -403,7 +403,7 @@ export default function VideoUrlPicker() {
                                 <span>📁</span> Tệp Video
                             </h2>
                             <input id="file-input" type="file" accept="video/mp4,video/mov,video/webm" className="hidden"
-                                onChange={(e) => e.target.files[0] && handleFileSelect(e.target.files[0])} />
+                               onChange={(e) => { if (e.target.files[0]) handleFileSelect(e.target.files[0]); e.target.value = ''; }}/>
 
                             {!videoFile ? (
                                 <div
