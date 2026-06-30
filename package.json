@@ -34,7 +34,7 @@
       "artifactName": "${productName}.${ext}"
     },
     "mac": {
-      "target": ["dmg", "zip"],
+      "target": ["dmg"],
       "artifactName": "${productName}.${ext}"
     },
     "directories": {
